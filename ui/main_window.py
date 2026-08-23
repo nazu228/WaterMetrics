@@ -30,6 +30,7 @@ from ui.about_page import AboutPage
 from ui.components.toast import ToastNotification
 from ui.dialogs.replacement_dialog import MeterReplacementDialog
 from ui.dialogs.command_palette import CommandPaletteDialog
+from ui.dialogs.welcome_dialog import WelcomeSetupDialog
 from ui.components.progress_overlay import CalculationProgressOverlay
 from ui.components.onboarding_overlay import OnboardingOverlay, OnboardingStep
 from ui.gl.ocean_widget import OceanWidget
@@ -477,9 +478,10 @@ class MainWindow(QMainWindow):
     def _open_command_palette(self):
         actions = [
             ("Запустить расчет водопотребления (Ctrl+R / F5)", "run", self.run_calculation),
-            ("Переключить в Режим Аркуса (Classic)", "dashboard", self._toggle_arcus_mode),
-            ("Проверить обновления на GitHub", "update", lambda: self.check_for_updates(silent=False)),
+            ("Мастер первичной настройки (Стиль, Язык, 3D-волны)", "edit", self.open_welcome_setup),
             ("Запустить обучение (Мастер первой проводки)", "sparkles", lambda: self.start_onboarding(force=True)),
+            ("Проверить обновления на GitHub", "update", lambda: self.check_for_updates(silent=False)),
+            ("Переключить в Режим Аркуса (Classic)", "dashboard", self._toggle_arcus_mode),
             ("Открыть терминал логов (Ctrl+L)", "logs", lambda: self.switch_page(2)),
             ("Настроить 3D-волны и оформление", "about", lambda: self.switch_page(4)),
             ("Мастер замен счетчиков ИПУ", "replace", self.open_replacement_dialog),
@@ -615,7 +617,15 @@ class MainWindow(QMainWindow):
         super().changeEvent(event)
 
     def _on_startup_checks(self):
-        """Проверки при запуске приложения: онбординг первого запуска и обновления."""
+        """Проверки при запуске приложения: первичная настройка, онбординг первого запуска и обновления."""
+        welcome_done = QSettings("WaterMetrics", "WelcomeSetup").value("FirstRunSetupCompleted", False, type=bool)
+        if not welcome_done:
+            dlg = WelcomeSetupDialog(self)
+            res = dlg.exec()
+            if dlg.start_onboarding_requested:
+                QTimer.singleShot(400, lambda: self.start_onboarding(force=True))
+            return
+
         onboarding_done = QSettings("WaterMetrics", "Onboarding").value("FirstRunCompleted", False, type=bool)
         if not onboarding_done:
             self.start_onboarding(force=False)
@@ -623,6 +633,12 @@ class MainWindow(QMainWindow):
             auto_check = QSettings("WaterMetrics", "Updates").value("AutoCheckUpdates", True, type=bool)
             if auto_check:
                 self.check_for_updates(silent=True)
+
+    def open_welcome_setup(self):
+        """Открытие мастера настроек и кастомизации оформления."""
+        dlg = WelcomeSetupDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.start_onboarding_requested:
+            QTimer.singleShot(400, lambda: self.start_onboarding(force=True))
 
     def check_for_updates(self, silent: bool = False):
         """Запуск проверки обновлений через AboutPage."""

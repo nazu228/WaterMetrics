@@ -14,6 +14,7 @@ from PySide6.QtGui import QMovie
 from config import APP_VERSION, DEFAULT_GITHUB_REPO
 from services.updater_service import GitHubUpdateChecker, GitHubReleaseInfo
 from ui.dialogs.update_dialog import UpdateDialog
+from ui.dialogs.welcome_dialog import WelcomeSetupDialog
 from ui.styles import get_svg_icon, ThemeManager
 from ui.components.interactive import HoverGlassCard
 from ui.components.toast import ToastNotification
@@ -264,6 +265,10 @@ class AboutPage(QWidget):
         self.btn_check_update.setIcon(get_svg_icon("update", color="#020617" if not is_light else "#FFFFFF"))
         self.btn_check_update.clicked.connect(self.check_updates)
 
+        self.btn_welcome_setup = QPushButton("Стиль и язык", objectName="SecondaryButton")
+        self.btn_welcome_setup.setIcon(get_svg_icon("edit"))
+        self.btn_welcome_setup.clicked.connect(self.show_welcome_setup)
+
         self.btn_onboarding = QPushButton("Обучение проводке", objectName="SecondaryButton")
         self.btn_onboarding.setIcon(get_svg_icon("sparkles"))
         self.btn_onboarding.clicked.connect(self.restart_onboarding)
@@ -277,6 +282,7 @@ class AboutPage(QWidget):
         self.btn_beach.clicked.connect(self.show_beach)
 
         btns.addWidget(self.btn_check_update)
+        btns.addWidget(self.btn_welcome_setup)
         btns.addWidget(self.btn_onboarding)
         btns.addWidget(self.btn_donate)
         btns.addWidget(self.btn_beach)
@@ -286,15 +292,28 @@ class AboutPage(QWidget):
         info_lay.addLayout(btns)
         layout.addWidget(self.info_card)
 
-        # 2. Карточка обновлений через GitHub
+        # 2. Карточка обновлений через GitHub (Единый визуальный стандарт с остальными карточками)
         self.update_card = HoverGlassCard()
         update_lay = QVBoxLayout(self.update_card)
         update_lay.setContentsMargins(24, 20, 24, 20)
-        update_lay.setSpacing(12)
+        update_lay.setSpacing(14)
 
-        lbl_upd_head = QLabel("🚀 Удаленные обновления ПО (GitHub Releases)", objectName="SectionTitle")
-        lbl_upd_head.setStyleSheet("font-size: 16px; font-weight: 700;")
-        update_lay.addWidget(lbl_upd_head)
+        upd_header_lay = QHBoxLayout()
+        upd_header_lay.setSpacing(14)
+        self.glass_upd_icon = GlassIconWidget("update", accent, size=QSize(42, 42))
+        upd_header_lay.addWidget(self.glass_upd_icon)
+
+        upd_title_vbox = QVBoxLayout()
+        upd_title_vbox.setSpacing(2)
+        lbl_upd_head = QLabel("Удаленные обновления ПО (GitHub Releases)", objectName="SectionTitle")
+        lbl_upd_head.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {accent};")
+        lbl_upd_sub = QLabel("Автоматическая проверка новых релизов, changelog и 1-click установка")
+        lbl_upd_sub.setStyleSheet("font-size: 12px; color: #94A3B8;")
+        upd_title_vbox.addWidget(lbl_upd_head)
+        upd_title_vbox.addWidget(lbl_upd_sub)
+        upd_header_lay.addLayout(upd_title_vbox, 1)
+
+        update_lay.addLayout(upd_header_lay)
 
         upd_settings = QSettings("WaterMetrics", "Updates")
         saved_repo = upd_settings.value("GitHubRepo", DEFAULT_GITHUB_REPO, type=str)
@@ -309,12 +328,12 @@ class AboutPage(QWidget):
         lbl_repo.setStyleSheet("font-size: 12px; color: #94A3B8; font-weight: 600;")
         self.txt_repo = QLineEdit(saved_repo)
         self.txt_repo.setPlaceholderText("owner/repository")
-        self.txt_repo.setMinimumHeight(32)
+        self.txt_repo.setMinimumHeight(34)
         self.txt_repo.textChanged.connect(self._on_repo_text_changed)
 
         self.btn_card_check = QPushButton("Проверить сейчас", objectName="PrimaryButton")
         self.btn_card_check.setIcon(get_svg_icon("update", color="#020617" if not is_light else "#FFFFFF"))
-        self.btn_card_check.setMinimumHeight(32)
+        self.btn_card_check.setMinimumHeight(34)
         self.btn_card_check.clicked.connect(self.check_updates)
 
         repo_row.addWidget(lbl_repo)
@@ -323,12 +342,13 @@ class AboutPage(QWidget):
         update_lay.addLayout(repo_row)
 
         self.chk_auto_updates = QCheckBox("Автоматически проверять обновления при каждом запуске")
+        self.chk_auto_updates.setStyleSheet(f"color: {accent}; font-weight: 600; font-size: 13px;")
         self.chk_auto_updates.setChecked(auto_check)
         self.chk_auto_updates.toggled.connect(self._on_auto_check_toggled)
         update_lay.addWidget(self.chk_auto_updates)
 
-        self.lbl_update_status = QLabel("Статус: нажмите «Проверить обновления» для запроса последнего релиза с GitHub.")
-        self.lbl_update_status.setStyleSheet("font-size: 12px; color: #64748B;")
+        self.lbl_update_status = QLabel("Статус: нажмите «Проверить сейчас» для запроса последнего релиза с GitHub.")
+        self.lbl_update_status.setStyleSheet("font-size: 12px; color: #64748B; font-weight: 600;")
         update_lay.addWidget(self.lbl_update_status)
 
         layout.addWidget(self.update_card)
@@ -730,3 +750,11 @@ class AboutPage(QWidget):
         win = self.window()
         if win and hasattr(win, 'start_onboarding'):
             win.start_onboarding(force=True)
+
+    def show_welcome_setup(self):
+        """Вызов мастера первичной настройки стилей, языка и 3D-волн."""
+        win = self.main_win or self.window()
+        dlg = WelcomeSetupDialog(win, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            if dlg.start_onboarding_requested and win and hasattr(win, 'start_onboarding'):
+                win.start_onboarding(force=True)

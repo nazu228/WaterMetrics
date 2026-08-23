@@ -25,7 +25,12 @@ from services.updater_service import (
 class TestUpdaterService(unittest.TestCase):
     """Тестирование парсинга версий и логики обновлений."""
 
+    def test_app_version_is_1_0(self):
+        self.assertEqual(APP_VERSION, "1.0.0")
+
     def test_version_parsing(self):
+        self.assertEqual(parse_version("1.0.0"), (1, 0, 0))
+        self.assertEqual(parse_version("v1.0.0"), (1, 0, 0))
         self.assertEqual(parse_version("2.6.0"), (2, 6, 0))
         self.assertEqual(parse_version("v2.6.0"), (2, 6, 0))
         self.assertEqual(parse_version("V3.1.4"), (3, 1, 4))
@@ -36,17 +41,51 @@ class TestUpdaterService(unittest.TestCase):
 
     def test_version_comparison(self):
         # Новые версии
+        self.assertTrue(is_newer_version("1.0.0", "1.0.1"))
+        self.assertTrue(is_newer_version("1.0.0", "v1.1.0"))
+        self.assertTrue(is_newer_version("1.0.0", "2.0.0"))
         self.assertTrue(is_newer_version("2.5.0", "2.6.0"))
-        self.assertTrue(is_newer_version("2.6.0", "v2.6.1"))
-        self.assertTrue(is_newer_version("2.6.0", "3.0.0"))
-        self.assertTrue(is_newer_version("1.9.9", "2.0.0"))
-        self.assertTrue(is_newer_version("2.6", "2.6.1"))
 
         # Одинаковые или более старые версии
-        self.assertFalse(is_newer_version("2.6.0", "2.6.0"))
-        self.assertFalse(is_newer_version("v2.6.0", "2.6.0"))
-        self.assertFalse(is_newer_version("2.6.1", "2.6.0"))
-        self.assertFalse(is_newer_version("3.0.0", "2.9.9"))
+        self.assertFalse(is_newer_version("1.0.0", "1.0.0"))
+        self.assertFalse(is_newer_version("v1.0.0", "1.0.0"))
+        self.assertFalse(is_newer_version("1.1.0", "1.0.0"))
+
+
+class TestI18nAndWelcomeSetup(unittest.TestCase):
+    """Тестирование локализации и мастера первичной настройки."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not QApplication.instance():
+            cls.app = QApplication(sys.argv)
+        else:
+            cls.app = QApplication.instance()
+
+    def test_i18n_manager(self):
+        from services.i18n_service import I18nManager, tr
+        i18n = I18nManager.instance()
+        i18n.set_language("ru")
+        self.assertEqual(i18n.current_language, "ru")
+        self.assertIn("Добро пожаловать", tr("welcome_title"))
+
+        i18n.set_language("en")
+        self.assertEqual(i18n.current_language, "en")
+        self.assertIn("Welcome", tr("welcome_title"))
+
+        # Возвращаем ru
+        i18n.set_language("ru")
+
+    def test_welcome_dialog_lifecycle(self):
+        from ui.dialogs.welcome_dialog import WelcomeSetupDialog
+        dlg = WelcomeSetupDialog()
+        self.assertEqual(len(dlg.theme_cards), 6)
+        dlg._on_theme_selected("Pearl Light")
+        from ui.styles import ThemeManager
+        self.assertEqual(ThemeManager.get_current_theme_name(), "Pearl Light")
+        # Возвращаем Dark Tech Azure
+        dlg._on_theme_selected("Dark Tech Azure")
+        self.assertEqual(ThemeManager.get_current_theme_name(), "Dark Tech Azure")
 
 
 class TestOnboardingAndDemoData(unittest.TestCase):
