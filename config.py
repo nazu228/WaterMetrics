@@ -17,7 +17,7 @@ BACKUP_DIR: str = os.path.join(DATA_DIR, "backups")
 APP_VERSION: str = "2.6.0"
 
 # Обновления через GitHub
-DEFAULT_GITHUB_REPO: str = "WaterMetrics/WaterMetrics"
+DEFAULT_GITHUB_REPO: str = "nazu228/WaterMetrics"
 GITHUB_API_BASE: str = "https://api.github.com/repos"
 
 # Демонстрационные файлы для обучения (первой проводки)
