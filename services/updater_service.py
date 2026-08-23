@@ -1,0 +1,288 @@
+"""
+services/updater_service.py
+Модуль удаленных обновлений WaterMetrics через GitHub Releases API.
+Обеспечивает асинхронную проверку, скачивание и безопасную установку обновлений на Windows.
+"""
+
+import os
+import sys
+import json
+import re
+import tempfile
+import subprocess
+import urllib.request
+import urllib.error
+import ssl
+from typing import Optional, Tuple, List
+from dataclasses import dataclass
+
+from PySide6.QtCore import QThread, Signal, QObject
+from config import APP_VERSION, DEFAULT_GITHUB_REPO, GITHUB_API_BASE
+
+
+def parse_version(version_str: str) -> Tuple[int, ...]:
+    """
+    Преобразует строку версии (например 'v2.6.0', '2.6.1-patch', 'v3.0') в кортеж чисел.
+    """
+    if not version_str:
+        return (0, 0, 0)
+    
+    clean = version_str.strip().lstrip('vV')
+    # Берем только числовую часть до дефисов или спецсимволов
+    main_part = clean.split('-')[0].split('+')[0]
+    tokens = re.findall(r'\d+', main_part)
+    if not tokens:
+        return (0, 0, 0)
+    return tuple(int(t) for t in tokens)
+
+
+def is_newer_version(current_ver: str, remote_ver: str) -> bool:
+    """
+    Проверяет, является ли remote_ver более новой, чем current_ver.
+    """
+    curr = parse_version(current_ver)
+    rem = parse_version(remote_ver)
+    
+    # Приводим к одинаковой длине для корректного сравнения
+    max_len = max(len(curr), len(rem), 3)
+    curr_pad = curr + (0,) * (max_len - len(curr))
+    rem_pad = rem + (0,) * (max_len - len(rem))
+    
+    return rem_pad > curr_pad
+
+
+@dataclass
+class GitHubReleaseInfo:
+    tag_name: str
+    version: str
+    name: str
+    body: str
+    published_at: str
+    html_url: str
+    asset_name: Optional[str] = None
+    asset_download_url: Optional[str] = None
+    asset_size: int = 0
+
+
+class GitHubUpdateChecker(QThread):
+    """
+    Асинхронный воркер проверки обновлений на GitHub Releases.
+    """
+    update_available = Signal(object)      # GitHubReleaseInfo
+    already_latest = Signal(str)          # current_version
+    check_failed = Signal(str)            # error_message
+
+    def __init__(self, repo: str = DEFAULT_GITHUB_REPO, current_ver: str = APP_VERSION, parent: Optional[QObject] = None):
+        super().__init__(parent)
+        self.repo = repo.strip()
+        self.current_ver = current_ver
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
+
+    def run(self):
+        try:
+            if not self.repo or "/" not in self.repo:
+                self.check_failed.emit(f"Некорректное имя репозитория GitHub: '{self.repo}'")
+                return
+
+            api_url = f"{GITHUB_API_BASE}/{self.repo}/releases/latest"
+            
+            req = urllib.request.Request(
+                api_url,
+                headers={
+                    "User-Agent": f"WaterMetrics-App/{self.current_ver}",
+                    "Accept": "application/vnd.github.v3+json"
+                }
+            )
+
+            # SSL context для безопасных запросов
+            ctx = ssl.create_default_context()
+
+            with urllib.request.urlopen(req, timeout=8.0, context=ctx) as response:
+                if self._is_cancelled:
+                    return
+                data = json.loads(response.read().decode('utf-8'))
+
+            tag_name = data.get("tag_name", "")
+            release_name = data.get("name", tag_name)
+            body = data.get("body", "")
+            published_at = data.get("published_at", "")
+            html_url = data.get("html_url", f"https://github.com/{self.repo}/releases")
+            assets = data.get("assets", [])
+
+            # Поиск подходящего ассета (.exe, .zip)
+            chosen_asset_name = None
+            chosen_download_url = None
+            chosen_size = 0
+
+            for asset in assets:
+                name = asset.get("name", "").lower()
+                if name.endswith(".exe") or name.endswith(".zip"):
+                    chosen_asset_name = asset.get("name")
+                    chosen_download_url = asset.get("browser_download_url")
+                    chosen_size = asset.get("size", 0)
+                    if name.endswith(".exe"):  # Приоритет исполняемому файлу
+                        break
+
+            release_info = GitHubReleaseInfo(
+                tag_name=tag_name,
+                version=tag_name.lstrip('vV'),
+                name=release_name,
+                body=body,
+                published_at=published_at,
+                html_url=html_url,
+                asset_name=chosen_asset_name,
+                asset_download_url=chosen_download_url,
+                asset_size=chosen_size
+            )
+
+            if is_newer_version(self.current_ver, tag_name):
+                self.update_available.emit(release_info)
+            else:
+                self.already_latest.emit(self.current_ver)
+
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                self.check_failed.emit(f"Релизы в репозитории {self.repo} не найдены (404)")
+            elif e.code == 403:
+                self.check_failed.emit("Превышен лимит запросов GitHub API. Повторите попытку позже.")
+            else:
+                self.check_failed.emit(f"Ошибка GitHub API: HTTP {e.code}")
+        except urllib.error.URLError as e:
+            self.check_failed.emit(f"Не удалось подключиться к GitHub: {e.reason}")
+        except Exception as e:
+            self.check_failed.emit(f"Ошибка при проверке обновлений: {str(e)}")
+
+
+class GitHubAssetDownloader(QThread):
+    """
+    Асинхронный воркер потокового скачивания файла обновления.
+    """
+    progress = Signal(int, int, int)       # percent (0-100), bytes_downloaded, total_bytes
+    finished = Signal(str)                 # local_temp_file_path
+    failed = Signal(str)                   # error_message
+
+    def __init__(self, download_url: str, filename: str = "WaterMetrics_update.exe", parent: Optional[QObject] = None):
+        super().__init__(parent)
+        self.download_url = download_url
+        self.filename = filename
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
+
+    def run(self):
+        temp_file_path = ""
+        try:
+            temp_dir = os.path.join(tempfile.gettempdir(), "watermetrics_updater")
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_file_path = os.path.join(temp_dir, self.filename)
+
+            req = urllib.request.Request(
+                self.download_url,
+                headers={"User-Agent": f"WaterMetrics-App/{APP_VERSION}"}
+            )
+
+            ctx = ssl.create_default_context()
+
+            with urllib.request.urlopen(req, timeout=20.0, context=ctx) as response:
+                total_size = int(response.headers.get("content-length", 0))
+                downloaded = 0
+                chunk_size = 64 * 1024  # 64 KB chunks
+
+                with open(temp_file_path, "wb") as f:
+                    while True:
+                        if self._is_cancelled:
+                            f.close()
+                            if os.path.exists(temp_file_path):
+                                os.remove(temp_file_path)
+                            return
+
+                        chunk = response.read(chunk_size)
+                        if not chunk:
+                            break
+
+                        f.write(chunk)
+                        downloaded += len(chunk)
+
+                        pct = int((downloaded / total_size) * 100) if total_size > 0 else 0
+                        self.progress.emit(pct, downloaded, total_size)
+
+            if not self._is_cancelled:
+                self.finished.emit(temp_file_path)
+
+        except Exception as e:
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.remove(temp_file_path)
+                except Exception:
+                    pass
+            self.failed.emit(f"Ошибка загрузки: {str(e)}")
+
+
+class WindowsUpdateDeployer:
+    """
+    Утилита для развертывания и безопасной замены исполняемого файла на Windows.
+    """
+
+    @staticmethod
+    def apply_update(downloaded_file: str) -> bool:
+        """
+        Запускает фоновый updater.bat, который ожидает завершения текущего процесса,
+        заменяет бинарник и перезапускает программу.
+        """
+        try:
+            is_frozen = getattr(sys, 'frozen', False)
+            current_exe = sys.executable if is_frozen else os.path.abspath(sys.argv[0])
+            current_pid = os.getpid()
+
+            # Если скачан установочный exe (installer), просто запускаем его
+            if "setup" in os.path.basename(downloaded_file).lower() or "install" in os.path.basename(downloaded_file).lower():
+                subprocess.Popen([downloaded_file], shell=True)
+                return True
+
+            if not is_frozen:
+                # В режиме исходного кода (Python) просто уведомляем пользователя о скачанном файле
+                return True
+
+            # В режиме скомпилированного .exe генерируем bat-скрипт
+            temp_dir = tempfile.gettempdir()
+            bat_path = os.path.join(temp_dir, "watermetrics_apply_update.bat")
+
+            bat_content = f"""@echo off
+chcp 65001 > nul
+echo Ожидание завершения WaterMetrics (PID: {current_pid})...
+:wait_loop
+tasklist /FI "PID eq {current_pid}" 2>NUL | find /I "{current_pid}" >NUL
+if not errorlevel 1 (
+    timeout /t 1 /nobreak > nul
+    goto wait_loop
+)
+
+timeout /t 1 /nobreak > nul
+echo Замена файла программы...
+copy /Y "{downloaded_file}" "{current_exe}" > nul
+
+echo Запуск обновленного WaterMetrics...
+start "" "{current_exe}"
+
+del "{downloaded_file}" > nul 2>&1
+del "%~f0" > nul 2>&1
+exit
+"""
+            with open(bat_path, "w", encoding="utf-8") as f:
+                f.write(bat_content)
+
+            # Запускаем автономный bat-процесс без привязки к текущему
+            creation_flags = 0
+            if sys.platform == 'win32':
+                creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP | 0x08000000  # CREATE_NO_WINDOW
+
+            subprocess.Popen(["cmd.exe", "/c", bat_path], creationflags=creation_flags, close_fds=True)
+            return True
+
+        except Exception as e:
+            print(f"[UpdateDeployer] Ошибка развертывания: {e}")
+            return False

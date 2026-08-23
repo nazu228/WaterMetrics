@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# PyInstaller / Build outputs
+build/
+dist/
+*.manifest
+test_results/
+
+# User Data & Backups
+.watermetrics/
+*.bak
+*.tmp
+
+# IDEs
+.vscode/
+.idea/
+.gemini/
+*.swp
+*.swo
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
