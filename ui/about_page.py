@@ -298,6 +298,9 @@ class AboutPage(QWidget):
 
         upd_settings = QSettings("WaterMetrics", "Updates")
         saved_repo = upd_settings.value("GitHubRepo", DEFAULT_GITHUB_REPO, type=str)
+        if not saved_repo or saved_repo == "WaterMetrics/WaterMetrics":
+            saved_repo = DEFAULT_GITHUB_REPO
+            upd_settings.setValue("GitHubRepo", DEFAULT_GITHUB_REPO)
         auto_check = upd_settings.value("AutoCheckUpdates", True, type=bool)
 
         repo_row = QHBoxLayout()
