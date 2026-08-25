@@ -639,24 +639,7 @@ class ExcelManager:
 
         ws.merge_cells(start_row=sig_row, start_column=1, end_row=sig_row, end_column=total_cols)
 
-        # 7. Настройка ширины колонок в соответствии с шаблоном (Tahoma 8.5 pt)
-        for col in range(1, total_cols + 1):
-            col_letter = get_column_letter(col)
-            max_len = 0
-            for row in range(5, tot_r + 1):
-                cell_val = ws.cell(row=row, column=col).value
-                if cell_val is not None:
-                    val_str = str(cell_val).strip()
-                    if val_str:
-                        max_len = max(max_len, len(val_str))
-
-            if col == name_col:
-                desired_width = max(max_len + 4, 14.0)
-            else:
-                desired_width = max(max_len + 3, 13.0)
-
-            ws.column_dimensions[col_letter].width = desired_width
-
+        # 7. Ширина колонок сохраняется строго из шаблона (без произвольных изменений)
         try:
             wb.save(save_path)
         except PermissionError:

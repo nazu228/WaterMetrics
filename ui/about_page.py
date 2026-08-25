@@ -1,15 +1,16 @@
 """
-ui/about_page.py — Экран "О программе" и Кастомизация 3D-волн и минимализма.
+ui/about_page.py — Экран "О программе", Кастомизация 3D-волн, Минимализм и Обратная связь.
 """
 
 import os
 import sys
+import urllib.parse
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
     QDialog, QFrame, QApplication, QSlider, QCheckBox, QScrollArea, QLineEdit
 )
-from PySide6.QtCore import Qt, QSize, QSettings, Slot
-from PySide6.QtGui import QMovie
+from PySide6.QtCore import Qt, QSize, QSettings, Slot, QUrl
+from PySide6.QtGui import QMovie, QDesktopServices
 
 from config import APP_VERSION, DEFAULT_GITHUB_REPO
 from services.updater_service import GitHubUpdateChecker, GitHubReleaseInfo
@@ -19,6 +20,19 @@ from ui.styles import get_svg_icon, ThemeManager
 from ui.components.interactive import HoverGlassCard
 from ui.components.toast import ToastNotification
 from ui.components.glass_icon import GlassIconWidget
+
+
+FEEDBACK_EMAIL = "nazuha2281337@gmail.com"
+FEEDBACK_SUBJECT_TEMPLATE = f"[WaterMetrics v{APP_VERSION}] Обратная связь / Предложение"
+FEEDBACK_BODY_TEMPLATE = f"""Здравствуйте, разработчик WaterMetrics!
+
+• Версия программы: WaterMetrics v{APP_VERSION}
+• Операционная система: Windows
+• Тема обращения: [Отзыв / Найдена ошибка / Пожелание по улучшению]
+
+Описание ситуации:
+[Пожалуйста, опишите ваш вопрос или предложение]
+"""
 
 
 def get_asset_path(filename: str) -> str:
@@ -49,13 +63,13 @@ def get_asset_path(filename: str) -> str:
 
 
 class DonateDialog(QDialog):
-    """Стильное бесшовное модальное окно пожертвований."""
+    """Стильное бесшовное модальное окно пожертвований с адаптивной темой."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(460, 260)
+        self.setFixedSize(480, 270)
         self.card_number = "40817810807004134433"
         self.init_ui()
 
@@ -74,14 +88,30 @@ class DonateDialog(QDialog):
 
         header_row = QHBoxLayout()
         lbl_title = QLabel("Поддержка разработки WaterMetrics", objectName="PageTitle")
-        title_col = "#0A246A" if curr_theme == "Как дома" else ("#0F172A" if is_light else "#F8FAFC")
+        title_col = "#0A246A" if curr_theme == "Как дома" else ("#0F172A" if curr_theme == "Pearl Light" else "#F8FAFC")
         lbl_title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {title_col};")
+        
         btn_x = QPushButton("✕")
         btn_x.setFixedSize(28, 28)
         btn_x.setCursor(Qt.PointingHandCursor)
-        close_btn_bg = "rgba(0, 0, 0, 0.05)" if is_light else "rgba(255, 255, 255, 0.07)"
-        close_btn_col = "#475569" if is_light else "#94A3B8"
-        btn_x.setStyleSheet(f"QPushButton {{ background: {close_btn_bg}; color: {close_btn_col}; border: 1px solid rgba(0, 0, 0, 0.15); border-radius: 8px; font-size: 13px; font-weight: bold; }} QPushButton:hover {{ background: rgba(239, 68, 68, 0.45); color: #FFFFFF; }}")
+        close_btn_bg = "rgba(0, 0, 0, 0.06)" if is_light else "rgba(255, 255, 255, 0.08)"
+        close_btn_col = "#334155" if is_light else "#94A3B8"
+        close_btn_border = "rgba(0, 0, 0, 0.15)" if is_light else "rgba(255, 255, 255, 0.15)"
+        btn_x.setStyleSheet(f"""
+            QPushButton {{
+                background: {close_btn_bg};
+                color: {close_btn_col};
+                border: 1px solid {close_btn_border};
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: rgba(239, 68, 68, 0.55);
+                color: #FFFFFF;
+                border-color: #EF4444;
+            }}
+        """)
         btn_x.clicked.connect(self.reject)
 
         header_row.addWidget(lbl_title, 1)
@@ -95,7 +125,7 @@ class DonateDialog(QDialog):
 
         lbl_bank = QLabel("Сбербанк / Номер счета / карты:")
         sub_col = "#475569" if is_light else "#94A3B8"
-        lbl_bank.setStyleSheet(f"color: {sub_col}; font-size: 12px;")
+        lbl_bank.setStyleSheet(f"color: {sub_col}; font-size: 12px; font-weight: 500;")
 
         lbl_num = QLabel(self.card_number)
         num_col = ("#0A246A" if curr_theme == "Как дома" else "#028090") if is_light else accent
@@ -150,6 +180,9 @@ class BeachRestDialog(QDialog):
         root_lay = QVBoxLayout(self)
         root_lay.setContentsMargins(0, 0, 0, 0)
 
+        curr_theme = ThemeManager.get_current_theme_name()
+        is_light = curr_theme in ("Pearl Light", "Как дома")
+
         self.card = HoverGlassCard()
         layout = QVBoxLayout(self.card)
         layout.setContentsMargins(20, 16, 20, 16)
@@ -157,11 +190,30 @@ class BeachRestDialog(QDialog):
 
         header_row = QHBoxLayout()
         lbl_title = QLabel("Приятного отдыха!", objectName="PageTitle")
-        lbl_title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        title_col = "#0A246A" if curr_theme == "Как дома" else ("#0F172A" if curr_theme == "Pearl Light" else "#F8FAFC")
+        lbl_title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {title_col};")
+        
         btn_x = QPushButton("✕")
         btn_x.setFixedSize(28, 28)
         btn_x.setCursor(Qt.PointingHandCursor)
-        btn_x.setStyleSheet("QPushButton { background: rgba(255, 255, 255, 0.07); color: #94A3B8; border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 8px; font-size: 13px; font-weight: bold; } QPushButton:hover { background: rgba(239, 68, 68, 0.45); color: #FFFFFF; }")
+        close_btn_bg = "rgba(0, 0, 0, 0.06)" if is_light else "rgba(255, 255, 255, 0.08)"
+        close_btn_col = "#334155" if is_light else "#94A3B8"
+        close_btn_border = "rgba(0, 0, 0, 0.15)" if is_light else "rgba(255, 255, 255, 0.15)"
+        btn_x.setStyleSheet(f"""
+            QPushButton {{
+                background: {close_btn_bg};
+                color: {close_btn_col};
+                border: 1px solid {close_btn_border};
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: rgba(239, 68, 68, 0.55);
+                color: #FFFFFF;
+                border-color: #EF4444;
+            }}
+        """)
         btn_x.clicked.connect(self.accept)
 
         header_row.addWidget(lbl_title, 1)
@@ -200,8 +252,147 @@ class BeachRestDialog(QDialog):
         super().closeEvent(event)
 
 
+class FeedbackDialog(QDialog):
+    """Интерактивное окно обратной связи и отправки писем разработчику."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(540, 380)
+        self.init_ui()
+
+    def init_ui(self):
+        root_lay = QVBoxLayout(self)
+        root_lay.setContentsMargins(0, 0, 0, 0)
+
+        curr_theme = ThemeManager.get_current_theme_name()
+        is_light = curr_theme in ("Pearl Light", "Как дома")
+        accent = ThemeManager.get_current_accent_color()
+
+        self.card = HoverGlassCard()
+        layout = QVBoxLayout(self.card)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        header_row = QHBoxLayout()
+        lbl_title = QLabel("Обратная связь с разработчиком", objectName="PageTitle")
+        title_col = "#0A246A" if curr_theme == "Как дома" else ("#0F172A" if curr_theme == "Pearl Light" else "#F8FAFC")
+        lbl_title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {title_col};")
+        
+        btn_x = QPushButton("✕")
+        btn_x.setFixedSize(28, 28)
+        btn_x.setCursor(Qt.PointingHandCursor)
+        close_btn_bg = "rgba(0, 0, 0, 0.06)" if is_light else "rgba(255, 255, 255, 0.08)"
+        close_btn_col = "#334155" if is_light else "#94A3B8"
+        close_btn_border = "rgba(0, 0, 0, 0.15)" if is_light else "rgba(255, 255, 255, 0.15)"
+        btn_x.setStyleSheet(f"""
+            QPushButton {{
+                background: {close_btn_bg};
+                color: {close_btn_col};
+                border: 1px solid {close_btn_border};
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: rgba(239, 68, 68, 0.55);
+                color: #FFFFFF;
+                border-color: #EF4444;
+            }}
+        """)
+        btn_x.clicked.connect(self.reject)
+
+        header_row.addWidget(lbl_title, 1)
+        header_row.addWidget(btn_x)
+        layout.addLayout(header_row)
+
+        info_card = HoverGlassCard()
+        info_lay = QVBoxLayout(info_card)
+        info_lay.setContentsMargins(16, 12, 16, 12)
+        info_lay.setSpacing(6)
+
+        lbl_to = QLabel("Email для связи и предложений:")
+        lbl_to.setStyleSheet(f"color: {'#475569' if is_light else '#94A3B8'}; font-size: 12px;")
+        
+        lbl_email = QLabel(FEEDBACK_EMAIL)
+        email_col = ("#0A246A" if curr_theme == "Как дома" else "#028090") if is_light else accent
+        lbl_email.setStyleSheet(f"color: {email_col}; font-size: 15px; font-weight: bold; font-family: monospace;")
+        lbl_email.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+        lbl_subj = QLabel(f"Тема письма: {FEEDBACK_SUBJECT_TEMPLATE}")
+        lbl_subj.setStyleSheet(f"color: {'#334155' if is_light else '#CBD5E1'}; font-size: 12px; font-weight: 500;")
+
+        info_lay.addWidget(lbl_to)
+        info_lay.addWidget(lbl_email)
+        info_lay.addWidget(lbl_subj)
+        layout.addWidget(info_card)
+
+        btn_grid = QGridLayout()
+        btn_grid.setSpacing(10)
+
+        btn_mailto = QPushButton("  Почтовый клиент", objectName="PrimaryButton")
+        btn_mailto.setIcon(get_svg_icon("mail", color="#FFFFFF" if is_light else "#020617"))
+        btn_mailto.setMinimumHeight(38)
+        btn_mailto.clicked.connect(self._open_mailto)
+
+        btn_gmail = QPushButton("  Открыть в Gmail", objectName="SecondaryButton")
+        btn_gmail.setIcon(get_svg_icon("external_link", color=accent))
+        btn_gmail.setMinimumHeight(38)
+        btn_gmail.clicked.connect(self._open_gmail)
+
+        btn_mailru = QPushButton("  Открыть в Mail.ru", objectName="SecondaryButton")
+        btn_mailru.setIcon(get_svg_icon("external_link", color=accent))
+        btn_mailru.setMinimumHeight(38)
+        btn_mailru.clicked.connect(self._open_mailru)
+
+        btn_copy = QPushButton("  Скопировать шаблон", objectName="SecondaryButton")
+        btn_copy.setIcon(get_svg_icon("copy", color=accent))
+        btn_copy.setMinimumHeight(38)
+        btn_copy.clicked.connect(self._copy_template)
+
+        btn_grid.addWidget(btn_mailto, 0, 0)
+        btn_grid.addWidget(btn_gmail, 0, 1)
+        btn_grid.addWidget(btn_mailru, 1, 0)
+        btn_grid.addWidget(btn_copy, 1, 1)
+        layout.addLayout(btn_grid)
+
+        btn_close = QPushButton("Закрыть", objectName="SecondaryButton")
+        btn_close.setMinimumHeight(34)
+        btn_close.clicked.connect(self.accept)
+        layout.addWidget(btn_close)
+
+        root_lay.addWidget(self.card)
+
+    def _open_mailto(self):
+        subject_enc = urllib.parse.quote(FEEDBACK_SUBJECT_TEMPLATE)
+        body_enc = urllib.parse.quote(FEEDBACK_BODY_TEMPLATE)
+        url = f"mailto:{FEEDBACK_EMAIL}?subject={subject_enc}&body={body_enc}"
+        QDesktopServices.openUrl(QUrl(url))
+        ToastNotification.show_toast(self, "Запущен системный почтовый клиент!", "SUCCESS")
+
+    def _open_gmail(self):
+        subject_enc = urllib.parse.quote(FEEDBACK_SUBJECT_TEMPLATE)
+        body_enc = urllib.parse.quote(FEEDBACK_BODY_TEMPLATE)
+        url = f"https://mail.google.com/mail/?view=cm&fs=1&to={FEEDBACK_EMAIL}&su={subject_enc}&body={body_enc}"
+        QDesktopServices.openUrl(QUrl(url))
+        ToastNotification.show_toast(self, "Открываем веб-интерфейс Gmail...", "INFO")
+
+    def _open_mailru(self):
+        subject_enc = urllib.parse.quote(FEEDBACK_SUBJECT_TEMPLATE)
+        body_enc = urllib.parse.quote(FEEDBACK_BODY_TEMPLATE)
+        url = f"https://e.mail.ru/compose/?to={FEEDBACK_EMAIL}&subject={subject_enc}&body={body_enc}"
+        QDesktopServices.openUrl(QUrl(url))
+        ToastNotification.show_toast(self, "Открываем веб-интерфейс Mail.ru...", "INFO")
+
+    def _copy_template(self):
+        full_text = f"Кому: {FEEDBACK_EMAIL}\nТема: {FEEDBACK_SUBJECT_TEMPLATE}\n\n{FEEDBACK_BODY_TEMPLATE}"
+        QApplication.clipboard().setText(full_text)
+        ToastNotification.show_toast(self, "Email, тема и образец письма скопированы в буфер обмена!", "SUCCESS")
+
+
 class AboutPage(QWidget):
-    """Экран сведений о системе и кастомизации 3D-волн и минимализма."""
+    """Экран сведений о системе, кастомизации 3D-волн, минимализма и обратной связи."""
 
     def __init__(self, main_win=None):
         super().__init__()
@@ -215,8 +406,8 @@ class AboutPage(QWidget):
         root_layout.setContentsMargins(20, 20, 20, 20)
         root_layout.setSpacing(14)
 
-        title = QLabel("О программе и Настройки 3D-волн", objectName="PageTitle")
-        root_layout.addWidget(title)
+        self.main_title = QLabel("О программе, Настройки 3D-волн и Обратная связь", objectName="PageTitle")
+        root_layout.addWidget(self.main_title)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -228,13 +419,18 @@ class AboutPage(QWidget):
         layout.setSpacing(16)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # 1. Сведения о системе
+        curr_theme = ThemeManager.get_current_theme_name()
+        is_light = curr_theme in ("Pearl Light", "Как дома")
+        accent = ThemeManager.get_current_accent_color()
+
+        # ==============================================================================
+        # 1. КАРТОЧКА: СВЕДЕНИЯ О СИСТЕМЕ
+        # ==============================================================================
         self.info_card = HoverGlassCard()
         info_lay = QVBoxLayout(self.info_card)
         info_lay.setContentsMargins(24, 20, 24, 20)
-        info_lay.setSpacing(10)
+        info_lay.setSpacing(12)
 
-        accent = ThemeManager.get_current_accent_color()
         self.glass_app_icon = GlassIconWidget("droplet", accent, size=QSize(48, 48))
 
         app_header_lay = QHBoxLayout()
@@ -242,25 +438,25 @@ class AboutPage(QWidget):
         app_header_lay.addWidget(self.glass_app_icon)
 
         title_vbox = QVBoxLayout()
-        title_vbox.setSpacing(2)
+        title_vbox.setSpacing(3)
         self.appName_label = QLabel("WaterMetrics Professional Edition")
         self.appName_label.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {accent};")
-        sub = QLabel("Система автоматизированного расчета и распределения объемов водопотребления")
-        sub.setStyleSheet("font-size: 13px; color: #94A3B8;")
+        
+        self.appSub_label = QLabel("Система автоматизированного расчета и распределения объемов водопотребления")
+        self.appSub_label.setStyleSheet("font-size: 13px; color: #94A3B8;")
+        
         title_vbox.addWidget(self.appName_label)
-        title_vbox.addWidget(sub)
+        title_vbox.addWidget(self.appSub_label)
 
         app_header_lay.addLayout(title_vbox, 1)
         info_lay.addLayout(app_header_lay)
 
-        ver = QLabel(f"Версия: v{APP_VERSION} (PySide6 Apple Frosted Glass & 3D Wave Edition)")
-        ver.setStyleSheet("font-size: 12px; color: #64748B; font-weight: 600;")
+        self.appVer_label = QLabel(f"Версия: v{APP_VERSION} (PySide6 Apple Frosted Glass & 3D Wave Edition)")
+        self.appVer_label.setStyleSheet("font-size: 12px; color: #94A3B8; font-weight: 600;")
 
         btns = QHBoxLayout()
         btns.setSpacing(10)
 
-        curr_theme = ThemeManager.get_current_theme_name()
-        is_light = curr_theme in ("Pearl Light", "Как дома")
         self.btn_check_update = QPushButton("Проверить обновления", objectName="PrimaryButton")
         self.btn_check_update.setIcon(get_svg_icon("update", color="#020617" if not is_light else "#FFFFFF"))
         self.btn_check_update.clicked.connect(self.check_updates)
@@ -273,6 +469,10 @@ class AboutPage(QWidget):
         self.btn_onboarding.setIcon(get_svg_icon("sparkles"))
         self.btn_onboarding.clicked.connect(self.restart_onboarding)
 
+        self.btn_feedback = QPushButton("Обратная связь", objectName="SecondaryButton")
+        self.btn_feedback.setIcon(get_svg_icon("mail"))
+        self.btn_feedback.clicked.connect(self.show_feedback_dialog)
+
         self.btn_donate = QPushButton("Поддержка", objectName="SecondaryButton")
         self.btn_donate.setIcon(get_svg_icon("about"))
         self.btn_donate.clicked.connect(self.show_donate)
@@ -284,15 +484,18 @@ class AboutPage(QWidget):
         btns.addWidget(self.btn_check_update)
         btns.addWidget(self.btn_welcome_setup)
         btns.addWidget(self.btn_onboarding)
+        btns.addWidget(self.btn_feedback)
         btns.addWidget(self.btn_donate)
         btns.addWidget(self.btn_beach)
         btns.addStretch()
 
-        info_lay.addWidget(ver)
+        info_lay.addWidget(self.appVer_label)
         info_lay.addLayout(btns)
         layout.addWidget(self.info_card)
 
-        # 2. Карточка обновлений через GitHub (Единый визуальный стандарт с остальными карточками)
+        # ==============================================================================
+        # 2. КАРТОЧКА: УДАЛЕННЫЕ ОБНОВЛЕНИЯ ПО (GITHUB RELEASES)
+        # ==============================================================================
         self.update_card = HoverGlassCard()
         update_lay = QVBoxLayout(self.update_card)
         update_lay.setContentsMargins(24, 20, 24, 20)
@@ -305,14 +508,15 @@ class AboutPage(QWidget):
 
         upd_title_vbox = QVBoxLayout()
         upd_title_vbox.setSpacing(2)
-        lbl_upd_head = QLabel("Удаленные обновления ПО (GitHub Releases)", objectName="SectionTitle")
-        lbl_upd_head.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {accent};")
-        lbl_upd_sub = QLabel("Автоматическая проверка новых релизов, changelog и 1-click установка")
-        lbl_upd_sub.setStyleSheet("font-size: 12px; color: #94A3B8;")
-        upd_title_vbox.addWidget(lbl_upd_head)
-        upd_title_vbox.addWidget(lbl_upd_sub)
+        self.lbl_upd_head = QLabel("Удаленные обновления ПО (GitHub Releases)", objectName="SectionTitle")
+        self.lbl_upd_head.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {accent};")
+        
+        self.lbl_upd_sub = QLabel("Автоматическая проверка новых релизов, changelog и 1-click установка")
+        self.lbl_upd_sub.setStyleSheet("font-size: 12px; color: #94A3B8;")
+        
+        upd_title_vbox.addWidget(self.lbl_upd_head)
+        upd_title_vbox.addWidget(self.lbl_upd_sub)
         upd_header_lay.addLayout(upd_title_vbox, 1)
-
         update_lay.addLayout(upd_header_lay)
 
         upd_settings = QSettings("WaterMetrics", "Updates")
@@ -324,8 +528,9 @@ class AboutPage(QWidget):
 
         repo_row = QHBoxLayout()
         repo_row.setSpacing(10)
-        lbl_repo = QLabel("Репозиторий GitHub:")
-        lbl_repo.setStyleSheet("font-size: 12px; color: #94A3B8; font-weight: 600;")
+        self.lbl_repo = QLabel("Репозиторий GitHub:")
+        self.lbl_repo.setStyleSheet("font-size: 12px; color: #CBD5E1; font-weight: 600;")
+        
         self.txt_repo = QLineEdit(saved_repo)
         self.txt_repo.setPlaceholderText("owner/repository")
         self.txt_repo.setMinimumHeight(34)
@@ -336,32 +541,111 @@ class AboutPage(QWidget):
         self.btn_card_check.setMinimumHeight(34)
         self.btn_card_check.clicked.connect(self.check_updates)
 
-        repo_row.addWidget(lbl_repo)
+        repo_row.addWidget(self.lbl_repo)
         repo_row.addWidget(self.txt_repo, 1)
         repo_row.addWidget(self.btn_card_check)
         update_lay.addLayout(repo_row)
 
         self.chk_auto_updates = QCheckBox("Автоматически проверять обновления при каждом запуске")
-        self.chk_auto_updates.setStyleSheet(f"color: {accent}; font-weight: 600; font-size: 13px;")
         self.chk_auto_updates.setChecked(auto_check)
         self.chk_auto_updates.toggled.connect(self._on_auto_check_toggled)
         update_lay.addWidget(self.chk_auto_updates)
 
         self.lbl_update_status = QLabel("Статус: нажмите «Проверить сейчас» для запроса последнего релиза с GitHub.")
-        self.lbl_update_status.setStyleSheet("font-size: 12px; color: #64748B; font-weight: 600;")
+        self.lbl_update_status.setStyleSheet("font-size: 12px; color: #94A3B8; font-weight: 600;")
         update_lay.addWidget(self.lbl_update_status)
 
         layout.addWidget(self.update_card)
 
-        # 2. Кастомизация 3D водяных волн
+        # ==============================================================================
+        # 3. КАРТОЧКА: ОБРАТНАЯ СВЯЗЬ И ПОДДЕРЖКА (FEEDBACK)
+        # ==============================================================================
+        self.feedback_card = HoverGlassCard()
+        feedback_lay = QVBoxLayout(self.feedback_card)
+        feedback_lay.setContentsMargins(24, 20, 24, 20)
+        feedback_lay.setSpacing(14)
+
+        fb_header_lay = QHBoxLayout()
+        fb_header_lay.setSpacing(14)
+        self.glass_fb_icon = GlassIconWidget("mail", accent, size=QSize(42, 42))
+        fb_header_lay.addWidget(self.glass_fb_icon)
+
+        fb_title_vbox = QVBoxLayout()
+        fb_title_vbox.setSpacing(2)
+        self.lbl_fb_head = QLabel("Обратная связь и техническая поддержка", objectName="SectionTitle")
+        self.lbl_fb_head.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {accent};")
+        
+        self.lbl_fb_sub = QLabel(f"Отправка отзывов, предложений и сообщений об ошибках разработчику ({FEEDBACK_EMAIL})")
+        self.lbl_fb_sub.setStyleSheet("font-size: 12px; color: #94A3B8;")
+        
+        fb_title_vbox.addWidget(self.lbl_fb_head)
+        fb_title_vbox.addWidget(self.lbl_fb_sub)
+        fb_header_lay.addLayout(fb_title_vbox, 1)
+        feedback_lay.addLayout(fb_header_lay)
+
+        # Информационная плашка с контактом и темой
+        self.fb_info_box = HoverGlassCard()
+        fb_box_lay = QVBoxLayout(self.fb_info_box)
+        fb_box_lay.setContentsMargins(16, 12, 16, 12)
+        fb_box_lay.setSpacing(6)
+
+        self.lbl_fb_email_title = QLabel("Контактный Email разработчика:")
+        self.lbl_fb_email_val = QLabel(FEEDBACK_EMAIL)
+        self.lbl_fb_email_val.setStyleSheet(f"color: {accent}; font-family: monospace; font-size: 14px; font-weight: bold;")
+        self.lbl_fb_email_val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+        self.lbl_fb_subj_val = QLabel(f"Автоматическая тема письма: {FEEDBACK_SUBJECT_TEMPLATE}")
+        self.lbl_fb_subj_val.setStyleSheet("font-size: 12px; color: #94A3B8; font-weight: 500;")
+
+        fb_box_lay.addWidget(self.lbl_fb_email_title)
+        fb_box_lay.addWidget(self.lbl_fb_email_val)
+        fb_box_lay.addWidget(self.lbl_fb_subj_val)
+        feedback_lay.addWidget(self.fb_info_box)
+
+        # Кнопки быстрых действий обратной связи
+        fb_btns_lay = QHBoxLayout()
+        fb_btns_lay.setSpacing(10)
+
+        self.btn_fb_mailto = QPushButton("  Почтовый клиент", objectName="PrimaryButton")
+        self.btn_fb_mailto.setIcon(get_svg_icon("mail", color="#FFFFFF" if is_light else "#020617"))
+        self.btn_fb_mailto.setMinimumHeight(34)
+        self.btn_fb_mailto.clicked.connect(self._open_mailto)
+
+        self.btn_fb_gmail = QPushButton("  Написать в Gmail", objectName="SecondaryButton")
+        self.btn_fb_gmail.setIcon(get_svg_icon("external_link", color=accent))
+        self.btn_fb_gmail.setMinimumHeight(34)
+        self.btn_fb_gmail.clicked.connect(self._open_gmail)
+
+        self.btn_fb_mailru = QPushButton("  Написать в Mail.ru", objectName="SecondaryButton")
+        self.btn_fb_mailru.setIcon(get_svg_icon("external_link", color=accent))
+        self.btn_fb_mailru.setMinimumHeight(34)
+        self.btn_fb_mailru.clicked.connect(self._open_mailru)
+
+        self.btn_fb_copy = QPushButton("  Скопировать шаблон", objectName="SecondaryButton")
+        self.btn_fb_copy.setIcon(get_svg_icon("copy", color=accent))
+        self.btn_fb_copy.setMinimumHeight(34)
+        self.btn_fb_copy.clicked.connect(self._copy_feedback_template)
+
+        fb_btns_lay.addWidget(self.btn_fb_mailto)
+        fb_btns_lay.addWidget(self.btn_fb_gmail)
+        fb_btns_lay.addWidget(self.btn_fb_mailru)
+        fb_btns_lay.addWidget(self.btn_fb_copy)
+        fb_btns_lay.addStretch()
+
+        feedback_lay.addLayout(fb_btns_lay)
+        layout.addWidget(self.feedback_card)
+
+        # ==============================================================================
+        # 4. КАРТОЧКА: КАСТОМИЗАЦИЯ 3D-ВОЛН
+        # ==============================================================================
         self.wave_card = HoverGlassCard()
         wave_lay = QVBoxLayout(self.wave_card)
         wave_lay.setContentsMargins(24, 20, 24, 20)
         wave_lay.setSpacing(14)
 
-        lbl_wave_head = QLabel("🌊 Редактор 3D-волн заднего плана (OpenGL)", objectName="SectionTitle")
-        lbl_wave_head.setStyleSheet("font-size: 16px; font-weight: 700;")
-        wave_lay.addWidget(lbl_wave_head)
+        self.lbl_wave_head = QLabel("🌊 Редактор 3D-волн заднего плана (OpenGL)", objectName="SectionTitle")
+        self.lbl_wave_head.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {accent};")
+        wave_lay.addWidget(self.lbl_wave_head)
 
         wave_settings = QSettings("WaterMetrics", "WaveSettings")
         init_waves_enabled = wave_settings.value("WavesEnabled", True, type=bool)
@@ -372,7 +656,6 @@ class AboutPage(QWidget):
         init_tilt = wave_settings.value("WaveTilt", 48, type=int)
 
         self.chk_enable_waves = QCheckBox("Отображать 3D-сетку волн (OpenGL background)")
-        self.chk_enable_waves.setStyleSheet(f"color: {accent}; font-weight: bold; font-size: 13px;")
         self.chk_enable_waves.setChecked(init_waves_enabled)
         self.chk_enable_waves.toggled.connect(self._on_waves_enabled_toggled)
         wave_lay.addWidget(self.chk_enable_waves)
@@ -381,7 +664,7 @@ class AboutPage(QWidget):
         grid_wave.setSpacing(12)
 
         # Плотность сетки (4 до 60 квадратов)
-        lbl_density_t = QLabel("Плотность сетки (от 4×4):", objectName="FieldLabel")
+        self.lbl_density_t = QLabel("Плотность сетки (от 4×4):", objectName="FieldLabel")
         self.lbl_density_val = QLabel(f"{init_density} x {init_density}")
         self.lbl_density_val.setStyleSheet(f"color: {accent}; font-weight: bold;")
         self.sld_density = QSlider(Qt.Orientation.Horizontal)
@@ -390,7 +673,7 @@ class AboutPage(QWidget):
         self.sld_density.valueChanged.connect(self._on_density_changed)
 
         # Прозрачность линий (0% до 100% - можно полностью убрать)
-        lbl_opacity_t = QLabel("Прозрачность линий (0% - полностью скрыть):", objectName="FieldLabel")
+        self.lbl_opacity_t = QLabel("Прозрачность линий (0% - полностью скрыть):", objectName="FieldLabel")
         self.lbl_opacity_val = QLabel(f"{init_opacity}%")
         self.lbl_opacity_val.setStyleSheet(f"color: {accent}; font-weight: bold;")
         self.sld_opacity = QSlider(Qt.Orientation.Horizontal)
@@ -399,7 +682,7 @@ class AboutPage(QWidget):
         self.sld_opacity.valueChanged.connect(self._on_opacity_changed)
 
         # Интенсивность / Амплитуда волн
-        lbl_amp_t = QLabel("Интенсивность волн (высота):", objectName="FieldLabel")
+        self.lbl_amp_t = QLabel("Интенсивность волн (высота):", objectName="FieldLabel")
         self.lbl_amp_val = QLabel(f"{init_amp}%")
         self.lbl_amp_val.setStyleSheet(f"color: {accent}; font-weight: bold;")
         self.sld_amp = QSlider(Qt.Orientation.Horizontal)
@@ -408,7 +691,7 @@ class AboutPage(QWidget):
         self.sld_amp.valueChanged.connect(self._on_amp_changed)
 
         # Скорость движения волн
-        lbl_speed_t = QLabel("Скорость анимации волн:", objectName="FieldLabel")
+        self.lbl_speed_t = QLabel("Скорость анимации волн:", objectName="FieldLabel")
         self.lbl_speed_val = QLabel(f"{init_speed / 10.0:.1f}x")
         self.lbl_speed_val.setStyleSheet(f"color: {accent}; font-weight: bold;")
         self.sld_speed = QSlider(Qt.Orientation.Horizontal)
@@ -417,7 +700,7 @@ class AboutPage(QWidget):
         self.sld_speed.valueChanged.connect(self._on_speed_changed)
 
         # Наклон сетки
-        lbl_tilt_t = QLabel("Наклон 3D сетки:", objectName="FieldLabel")
+        self.lbl_tilt_t = QLabel("Наклон 3D сетки:", objectName="FieldLabel")
         self.lbl_tilt_val = QLabel(f"{init_tilt}°")
         self.lbl_tilt_val.setStyleSheet(f"color: {accent}; font-weight: bold;")
         self.sld_tilt = QSlider(Qt.Orientation.Horizontal)
@@ -425,38 +708,40 @@ class AboutPage(QWidget):
         self.sld_tilt.setValue(init_tilt)
         self.sld_tilt.valueChanged.connect(self._on_tilt_changed)
 
-        grid_wave.addWidget(lbl_density_t, 0, 0)
+        grid_wave.addWidget(self.lbl_density_t, 0, 0)
         grid_wave.addWidget(self.sld_density, 0, 1)
         grid_wave.addWidget(self.lbl_density_val, 0, 2)
 
-        grid_wave.addWidget(lbl_opacity_t, 1, 0)
+        grid_wave.addWidget(self.lbl_opacity_t, 1, 0)
         grid_wave.addWidget(self.sld_opacity, 1, 1)
         grid_wave.addWidget(self.lbl_opacity_val, 1, 2)
 
-        grid_wave.addWidget(lbl_amp_t, 2, 0)
+        grid_wave.addWidget(self.lbl_amp_t, 2, 0)
         grid_wave.addWidget(self.sld_amp, 2, 1)
         grid_wave.addWidget(self.lbl_amp_val, 2, 2)
 
-        grid_wave.addWidget(lbl_speed_t, 3, 0)
+        grid_wave.addWidget(self.lbl_speed_t, 3, 0)
         grid_wave.addWidget(self.sld_speed, 3, 1)
         grid_wave.addWidget(self.lbl_speed_val, 3, 2)
 
-        grid_wave.addWidget(lbl_tilt_t, 4, 0)
+        grid_wave.addWidget(self.lbl_tilt_t, 4, 0)
         grid_wave.addWidget(self.sld_tilt, 4, 1)
         grid_wave.addWidget(self.lbl_tilt_val, 4, 2)
 
         wave_lay.addLayout(grid_wave)
         layout.addWidget(self.wave_card)
 
-        # 3. Видимость элементов интерфейса (Минимализм)
+        # ==============================================================================
+        # 5. КАРТОЧКА: ВИДИМОСТЬ ЭЛЕМЕНТОВ ИНТЕРФЕЙСА (МИНИМАЛИЗМ)
+        # ==============================================================================
         self.vis_card = HoverGlassCard()
         vis_lay = QVBoxLayout(self.vis_card)
         vis_lay.setContentsMargins(24, 20, 24, 20)
-        vis_lay.setSpacing(12)
+        vis_lay.setSpacing(14)
 
-        lbl_vis_head = QLabel("👁 Отображение элементов Главного экрана (Минимализм)", objectName="SectionTitle")
-        lbl_vis_head.setStyleSheet("font-size: 16px; font-weight: 700;")
-        vis_lay.addWidget(lbl_vis_head)
+        self.lbl_vis_head = QLabel("👁 Отображение элементов Главного экрана (Минимализм)", objectName="SectionTitle")
+        self.lbl_vis_head.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {accent};")
+        vis_lay.addWidget(self.lbl_vis_head)
 
         grid_vis = QGridLayout()
         grid_vis.setSpacing(12)
@@ -508,21 +793,154 @@ class AboutPage(QWidget):
         self.update_theme_elements()
 
     def update_theme_elements(self, theme_name: str = None):
+        """Динамическое применение стилей, цветов и контраста для всех тем."""
         curr_theme = theme_name or ThemeManager.get_current_theme_name()
         is_light = curr_theme in ("Pearl Light", "Как дома")
         accent = ThemeManager.get_current_accent_color()
+
+        # Цветовые константы под текущую тему
+        if curr_theme == "Как дома":
+            title_col = "#0A246A"
+            head_col = "#0A246A"
+            sub_col = "#475569"
+            label_col = "#1E293B"
+            chk_col = "#0A246A"
+            input_bg = "#FFFFFF"
+            input_border = "#7F9DB9"
+            input_text = "#000000"
+            box_bg = "rgba(10, 36, 106, 0.04)"
+            box_border = "#7F9DB9"
+        elif curr_theme == "Pearl Light":
+            title_col = "#0F172A"
+            head_col = "#028090"
+            sub_col = "#475569"
+            label_col = "#1E293B"
+            chk_col = "#028090"
+            input_bg = "#FFFFFF"
+            input_border = "rgba(2, 128, 144, 0.35)"
+            input_text = "#0F172A"
+            box_bg = "rgba(2, 128, 144, 0.05)"
+            box_border = "rgba(2, 128, 144, 0.25)"
+        else:
+            title_col = "#F8FAFC"
+            head_col = accent
+            sub_col = "#94A3B8"
+            label_col = "#E2E8F0"
+            chk_col = accent
+            input_bg = "rgba(255, 255, 255, 0.06)"
+            input_border = "rgba(255, 255, 255, 0.18)"
+            input_text = "#F8FAFC"
+            box_bg = "rgba(255, 255, 255, 0.03)"
+            box_border = "rgba(255, 255, 255, 0.08)"
+
+        # Иконки
         if hasattr(self, 'glass_app_icon'):
             self.glass_app_icon.set_color(accent)
+        if hasattr(self, 'glass_upd_icon'):
+            self.glass_upd_icon.set_color(accent)
+        if hasattr(self, 'glass_fb_icon'):
+            self.glass_fb_icon.set_color(accent)
+
+        # Главный заголовок
+        if hasattr(self, 'main_title'):
+            self.main_title.setStyleSheet(f"color: {title_col}; font-size: 20px; font-weight: 700;")
+
+        # Заголовки разделов
         if hasattr(self, 'appName_label'):
-            title_col = "#0A246A" if curr_theme == "Как дома" else ("#0F172A" if curr_theme == "Pearl Light" else accent)
-            self.appName_label.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {title_col};")
-        if hasattr(self, 'chk_enable_waves'):
-            chk_col = "#0A246A" if curr_theme == "Как дома" else ("#028090" if curr_theme == "Pearl Light" else accent)
-            self.chk_enable_waves.setStyleSheet(f"color: {chk_col}; font-weight: bold; font-size: 13px;")
-        for attr_name in ('lbl_density_val', 'lbl_opacity_val', 'lbl_amp_val', 'lbl_speed_val', 'lbl_tilt_val'):
-            if hasattr(self, attr_name):
-                val_col = "#0A246A" if curr_theme == "Как дома" else ("#028090" if curr_theme == "Pearl Light" else accent)
-                getattr(self, attr_name).setStyleSheet(f"color: {val_col}; font-weight: bold;")
+            app_title_col = "#0A246A" if curr_theme == "Как дома" else ("#0F172A" if curr_theme == "Pearl Light" else accent)
+            self.appName_label.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {app_title_col};")
+        if hasattr(self, 'appSub_label'):
+            self.appSub_label.setStyleSheet(f"font-size: 13px; color: {sub_col};")
+        if hasattr(self, 'appVer_label'):
+            self.appVer_label.setStyleSheet(f"font-size: 12px; color: {sub_col}; font-weight: 600;")
+
+        for h_name in ('lbl_upd_head', 'lbl_fb_head', 'lbl_wave_head', 'lbl_vis_head'):
+            if hasattr(self, h_name):
+                getattr(self, h_name).setStyleSheet(f"font-size: 16px; font-weight: 700; color: {head_col};")
+
+        for s_name in ('lbl_upd_sub', 'lbl_fb_sub'):
+            if hasattr(self, s_name):
+                getattr(self, s_name).setStyleSheet(f"font-size: 12px; color: {sub_col};")
+
+        if hasattr(self, 'lbl_repo'):
+            self.lbl_repo.setStyleSheet(f"font-size: 12px; color: {label_col}; font-weight: 600;")
+
+        if hasattr(self, 'txt_repo'):
+            self.txt_repo.setStyleSheet(f"""
+                QLineEdit {{
+                    background: {input_bg};
+                    color: {input_text};
+                    border: 1px solid {input_border};
+                    border-radius: 8px;
+                    padding: 4px 10px;
+                    font-size: 12px;
+                }}
+                QLineEdit:focus {{
+                    border: 1.5px solid {accent};
+                }}
+            """)
+
+        # Чекбоксы
+        chk_style = f"""
+            QCheckBox {{
+                color: {label_col};
+                font-weight: 600;
+                font-size: 13px;
+                spacing: 8px;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                border: 1px solid {input_border};
+                background: {input_bg};
+            }}
+            QCheckBox::indicator:checked {{
+                background: {accent};
+                border-color: {accent};
+            }}
+        """
+        for chk_name in ('chk_auto_updates', 'chk_enable_waves', 'chk_vis_kpi', 'chk_vis_files',
+                         'chk_vis_targets', 'chk_vis_hist', 'chk_vis_control', 'chk_vis_title'):
+            if hasattr(self, chk_name):
+                getattr(self, chk_name).setStyleSheet(chk_style)
+
+        # Слайдеры и подписи
+        for l_name in ('lbl_density_t', 'lbl_opacity_t', 'lbl_amp_t', 'lbl_speed_t', 'lbl_tilt_t'):
+            if hasattr(self, l_name):
+                getattr(self, l_name).setStyleSheet(f"color: {label_col}; font-size: 12px; font-weight: 600;")
+
+        for v_name in ('lbl_density_val', 'lbl_opacity_val', 'lbl_amp_val', 'lbl_speed_val', 'lbl_tilt_val'):
+            if hasattr(self, v_name):
+                getattr(self, v_name).setStyleSheet(f"color: {chk_col}; font-weight: bold; font-size: 12px;")
+
+        # Блок обратной связи
+        if hasattr(self, 'fb_info_box'):
+            self.fb_info_box.setStyleSheet(f"QFrame {{ background: {box_bg}; border: 1px solid {box_border}; border-radius: 12px; }}")
+        if hasattr(self, 'lbl_fb_email_title'):
+            self.lbl_fb_email_title.setStyleSheet(f"color: {sub_col}; font-size: 12px; font-weight: 500;")
+        if hasattr(self, 'lbl_fb_email_val'):
+            self.lbl_fb_email_val.setStyleSheet(f"color: {chk_col}; font-family: monospace; font-size: 14px; font-weight: bold;")
+        if hasattr(self, 'lbl_fb_subj_val'):
+            self.lbl_fb_subj_val.setStyleSheet(f"color: {label_col}; font-size: 12px; font-weight: 500;")
+
+        # Кнопки
+        if hasattr(self, 'btn_check_update'):
+            self.btn_check_update.setIcon(get_svg_icon("update", color="#FFFFFF" if is_light else "#020617"))
+        if hasattr(self, 'btn_card_check'):
+            self.btn_card_check.setIcon(get_svg_icon("update", color="#FFFFFF" if is_light else "#020617"))
+        if hasattr(self, 'btn_fb_mailto'):
+            self.btn_fb_mailto.setIcon(get_svg_icon("mail", color="#FFFFFF" if is_light else "#020617"))
+        if hasattr(self, 'btn_fb_gmail'):
+            self.btn_fb_gmail.setIcon(get_svg_icon("external_link", color=chk_col))
+        if hasattr(self, 'btn_fb_mailru'):
+            self.btn_fb_mailru.setIcon(get_svg_icon("external_link", color=chk_col))
+        if hasattr(self, 'btn_fb_copy'):
+            self.btn_fb_copy.setIcon(get_svg_icon("copy", color=chk_col))
+        if hasattr(self, 'btn_feedback'):
+            self.btn_feedback.setIcon(get_svg_icon("mail", color=chk_col))
+        if hasattr(self, 'btn_donate'):
+            self.btn_donate.setIcon(get_svg_icon("about", color=chk_col))
 
         if hasattr(self, 'btn_beach'):
             if curr_theme == "Как дома":
@@ -535,10 +953,7 @@ class AboutPage(QWidget):
                 self.btn_beach.setStyleSheet("")
                 self.btn_beach.setIcon(get_svg_icon("run", color="#020617"))
 
-        if hasattr(self, 'btn_donate'):
-            donate_icon_col = "#0A246A" if curr_theme == "Как дома" else ("#028090" if curr_theme == "Pearl Light" else "#94A3B8")
-            self.btn_donate.setIcon(get_svg_icon("about", color=donate_icon_col))
-
+        # Карточки GlassCard под все 6 тем
         card_bgs = {
             "Dark Tech Azure": ("#0B1736", "#00F2FE", "18px"),
             "Cyberpunk Neon": ("#240536", "#FF007F", "18px"),
@@ -550,13 +965,43 @@ class AboutPage(QWidget):
         bg, border, rad = card_bgs.get(curr_theme, ("#0B1736", accent, "18px"))
         card_style = f"QFrame#GlassCard {{ background-color: {bg}; border: 1.5px solid {border}; border-radius: {rad}; }}"
 
-        for card_name in ('info_card', 'wave_card', 'vis_card'):
+        for card_name in ('info_card', 'update_card', 'feedback_card', 'wave_card', 'vis_card'):
             if hasattr(self, card_name):
                 c = getattr(self, card_name)
                 c.setStyleSheet(card_style)
                 c.style().unpolish(c)
                 c.style().polish(c)
                 c.update()
+
+    def _open_mailto(self):
+        subject_enc = urllib.parse.quote(FEEDBACK_SUBJECT_TEMPLATE)
+        body_enc = urllib.parse.quote(FEEDBACK_BODY_TEMPLATE)
+        url = f"mailto:{FEEDBACK_EMAIL}?subject={subject_enc}&body={body_enc}"
+        QDesktopServices.openUrl(QUrl(url))
+        ToastNotification.show_toast(self, "Запущен системный почтовый клиент!", "SUCCESS")
+
+    def _open_gmail(self):
+        subject_enc = urllib.parse.quote(FEEDBACK_SUBJECT_TEMPLATE)
+        body_enc = urllib.parse.quote(FEEDBACK_BODY_TEMPLATE)
+        url = f"https://mail.google.com/mail/?view=cm&fs=1&to={FEEDBACK_EMAIL}&su={subject_enc}&body={body_enc}"
+        QDesktopServices.openUrl(QUrl(url))
+        ToastNotification.show_toast(self, "Открываем веб-интерфейс Gmail...", "INFO")
+
+    def _open_mailru(self):
+        subject_enc = urllib.parse.quote(FEEDBACK_SUBJECT_TEMPLATE)
+        body_enc = urllib.parse.quote(FEEDBACK_BODY_TEMPLATE)
+        url = f"https://e.mail.ru/compose/?to={FEEDBACK_EMAIL}&subject={subject_enc}&body={body_enc}"
+        QDesktopServices.openUrl(QUrl(url))
+        ToastNotification.show_toast(self, "Открываем веб-интерфейс Mail.ru...", "INFO")
+
+    def _copy_feedback_template(self):
+        full_text = f"Кому: {FEEDBACK_EMAIL}\nТема: {FEEDBACK_SUBJECT_TEMPLATE}\n\n{FEEDBACK_BODY_TEMPLATE}"
+        QApplication.clipboard().setText(full_text)
+        ToastNotification.show_toast(self, "Email, тема и образец письма скопированы!", "SUCCESS")
+
+    def show_feedback_dialog(self):
+        dlg = FeedbackDialog(self)
+        dlg.exec()
 
     def _get_ocean(self):
         win = self.window()
@@ -687,9 +1132,13 @@ class AboutPage(QWidget):
                 self.btn_card_check.setEnabled(False)
                 self.btn_card_check.setText("⏳ Проверка...")
 
+        curr_theme = ThemeManager.get_current_theme_name()
+        is_light = curr_theme in ("Pearl Light", "Как дома")
+        status_info_col = "#028090" if is_light else "#00F2FE"
+
         if hasattr(self, 'lbl_update_status'):
             self.lbl_update_status.setText(f"Проверка обновлений в репозитории {repo}...")
-            self.lbl_update_status.setStyleSheet("font-size: 12px; color: #00d2ff;")
+            self.lbl_update_status.setStyleSheet(f"font-size: 12px; color: {status_info_col}; font-weight: 600;")
 
         self.update_checker = GitHubUpdateChecker(repo=repo, current_ver=APP_VERSION, parent=self)
         self.update_checker.update_available.connect(self._on_update_available)
@@ -706,9 +1155,13 @@ class AboutPage(QWidget):
             self.btn_card_check.setEnabled(True)
             self.btn_card_check.setText("Проверить сейчас")
 
+        curr_theme = ThemeManager.get_current_theme_name()
+        is_light = curr_theme in ("Pearl Light", "Как дома")
+        avail_col = "#028090" if is_light else "#00d890"
+
         if hasattr(self, 'lbl_update_status'):
             self.lbl_update_status.setText(f"🔥 Доступна новая версия v{release_info.version}!")
-            self.lbl_update_status.setStyleSheet("font-size: 12px; color: #00d890; font-weight: bold;")
+            self.lbl_update_status.setStyleSheet(f"font-size: 12px; color: {avail_col}; font-weight: bold;")
 
         dlg = UpdateDialog(release_info, self.window() or self)
         dlg.exec()
@@ -724,6 +1177,41 @@ class AboutPage(QWidget):
 
         if hasattr(self, 'lbl_update_status'):
             self.lbl_update_status.setText(f"✅ У вас установлена самая свежая версия v{ver}")
+            self.lbl_update_status.setStyleSheet("font-size: 12px; color: #10B981; font-weight: 600;")
+
+        if not getattr(self, '_silent_check', False):
+            ToastNotification.show_toast(self.window() or self, f"WaterMetrics v{ver} — установлена последняя версия!", "SUCCESS")
+
+    @Slot(str)
+    def _on_check_failed(self, err_msg: str):
+        if hasattr(self, 'btn_check_update'):
+            self.btn_check_update.setEnabled(True)
+            self.btn_check_update.setText("Проверить обновления")
+        if hasattr(self, 'btn_card_check'):
+            self.btn_card_check.setEnabled(True)
+            self.btn_card_check.setText("Проверить сейчас")
+
+        if hasattr(self, 'lbl_update_status'):
+            self.lbl_update_status.setText(f"⚠️ {err_msg}")
+            self.lbl_update_status.setStyleSheet("font-size: 12px; color: #EF4444; font-weight: 600;")
+
+        if not getattr(self, '_silent_check', False):
+            ToastNotification.show_toast(self.window() or self, f"Проверка обновлений: {err_msg}", "ERROR")
+
+    def restart_onboarding(self):
+        """Перезапуск интерактивного обучения первой проводке."""
+        win = self.window()
+        if win and hasattr(win, 'start_onboarding'):
+            win.start_onboarding(force=True)
+
+    def show_welcome_setup(self):
+        """Вызов мастера первичной настройки стилей, языка и 3D-волн."""
+        win = self.main_win or self.window()
+        dlg = WelcomeSetupDialog(win, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            if dlg.start_onboarding_requested and win and hasattr(win, 'start_onboarding'):
+                win.start_onboarding(force=True)
+�ия v{ver}")
             self.lbl_update_status.setStyleSheet("font-size: 12px; color: #10B981; font-weight: 600;")
 
         if not getattr(self, '_silent_check', False):

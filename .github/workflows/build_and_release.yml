@@ -44,7 +44,7 @@ jobs:
         with:
           files: |
             dist/WaterMetrics.exe
-            dist/WaterMetrics_Setup_v1.0.exe
+            dist/WaterMetrics_Setup_*.exe
           generate_release_notes: true
           draft: false
           prerelease: false
