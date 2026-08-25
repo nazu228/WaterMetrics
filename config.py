@@ -14,7 +14,7 @@ HISTORY_FILE: str = os.path.join(DATA_DIR, "history.json")
 BACKUP_DIR: str = os.path.join(DATA_DIR, "backups")
 
 # Версия приложения
-APP_VERSION: str = "1.0.2"
+APP_VERSION: str = "1.0.21"
 
 # Обновления через GitHub
 DEFAULT_GITHUB_REPO: str = "nazu228/WaterMetrics"

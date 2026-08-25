@@ -25,8 +25,8 @@ from services.updater_service import (
 class TestUpdaterService(unittest.TestCase):
     """Тестирование парсинга версий и логики обновлений."""
 
-    def test_app_version_is_1_0_2(self):
-        self.assertEqual(APP_VERSION, "1.0.2")
+    def test_app_version_is_1_0_21(self):
+        self.assertEqual(APP_VERSION, "1.0.21")
 
     def test_version_parsing(self):
         self.assertEqual(parse_version("1.0.0"), (1, 0, 0))
@@ -196,17 +196,17 @@ class TestVersionManagerAndCrashGuard(unittest.TestCase):
     def test_version_manager_installed_versions(self):
         from services.updater_service import VersionManager
         versions = VersionManager.get_installed_versions()
-        self.assertIn("1.0.2", versions)
+        self.assertIn("1.0.21", versions)
 
     def test_version_manager_active_version(self):
         from services.updater_service import VersionManager
-        VersionManager.set_active_version("1.0.2")
-        self.assertEqual(VersionManager.get_active_version(), "1.0.2")
+        VersionManager.set_active_version("1.0.21")
+        self.assertEqual(VersionManager.get_active_version(), "1.0.21")
 
     def test_crash_guard_flow(self):
         from services.updater_service import VersionManager
         # 1. Запуск
-        VersionManager.crash_guard_mark_starting("1.0.2")
+        VersionManager.crash_guard_mark_starting("1.0.21")
         # 2. Успех
         VersionManager.crash_guard_mark_success()
         # 3. Проверка отсутствия сбоя

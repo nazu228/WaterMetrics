@@ -608,17 +608,27 @@ class ExcelManager:
         # 4. Оформление и пересчет сумм в единственной итоговой строке 'Итого'
         tot_r = cur_r
         ws.row_dimensions[tot_r].height = 17.25
-        cell_tot_lbl = ws.cell(row=tot_r, column=name_col)
-        cell_tot_lbl.value = "Итого"
-        cell_tot_lbl.font = font_main
-        cell_tot_lbl.alignment = align_left
+        font_tot = Font(name="Tahoma", size=8.25, bold=True)
+        border_tot = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
 
         for c in range(1, total_cols + 1):
             cell = ws.cell(row=tot_r, column=c)
-            cell.font = font_main
-            cell.border = border_thin
+            cell.value = None
+            cell.font = font_tot
+            cell.border = border_tot
+            cell.fill = PatternFill(fill_type=None)
             if c != name_col:
                 cell.alignment = align_right
+
+        cell_tot_lbl = ws.cell(row=tot_r, column=name_col)
+        cell_tot_lbl.value = "Итого"
+        cell_tot_lbl.font = font_tot
+        cell_tot_lbl.alignment = align_left
 
         for m in meters:
             sum_cons = round(sum(ap['consum'].get((m['type'], m['num']), 0.0) for ap in all_rows.values()), 3)
@@ -656,10 +666,25 @@ class ExcelManager:
         ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=total_cols)
         ws.cell(row=2, column=1).alignment = align_center
 
-        # 6. Динамическая подпись — Tahoma 11pt строго для строки подписи
+        # 6. Динамическая подпись и очистка промежуточных строк
         sig_row = tot_r + 3
-        ws.cell(row=sig_row - 2, column=1).value = None
-        ws.cell(row=sig_row - 1, column=1).value = None
+
+        # Очищаем промежуточные пустые строки от старых данных и границ
+        for empty_r in range(tot_r + 1, sig_row):
+            ws.row_dimensions[empty_r].height = 17.25
+            for c in range(1, total_cols + 1):
+                cell = ws.cell(row=empty_r, column=c)
+                cell.value = None
+                cell.border = Border()
+                cell.fill = PatternFill(fill_type=None)
+
+        # Строка подписи
+        ws.row_dimensions[sig_row].height = 24.0
+        for c in range(1, total_cols + 1):
+            cell = ws.cell(row=sig_row, column=c)
+            cell.value = None
+            cell.border = Border()
+            cell.fill = PatternFill(fill_type=None)
 
         sig_text = 'Директор ООО "Южный дом"  Бочарова В.М.               ___________________'
 
@@ -670,7 +695,25 @@ class ExcelManager:
 
         ws.merge_cells(start_row=sig_row, start_column=1, end_row=sig_row, end_column=total_cols)
 
-        # 7. Гарантированное сохранение ширины колонок в точности как в исходном шаблоне
+        # Удаление фантомных строк исходного шаблона после строки подписи
+        if ws.max_row > sig_row:
+            ws.delete_rows(sig_row + 1, ws.max_row - sig_row)
+
+        # 7. Настройки профессиональной печати (Page Setup & Print Configuration)
+        try:
+            ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
+            ws.page_setup.paperSize = ws.PAPERSIZE_A4
+            if ws.sheet_properties and ws.sheet_properties.pageSetUpPr:
+                ws.sheet_properties.pageSetUpPr.fitToPage = True
+            ws.page_setup.fitToWidth = 1
+            ws.page_setup.fitToHeight = 0
+            if detail_row:
+                ws.print_title_rows = f'{detail_row}:{detail_row}'
+            ws.print_area = f'A1:{get_column_letter(total_cols)}{sig_row}'
+        except Exception:
+            pass
+
+        # 8. Гарантированное сохранение ширины колонок в точности как в исходном шаблоне
         if hasattr(self, 'template_column_widths') and self.template_column_widths:
             for col in range(1, total_cols + 1):
                 col_letter = get_column_letter(col)
