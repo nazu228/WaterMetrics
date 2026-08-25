@@ -16,8 +16,8 @@ import ssl
 from typing import Optional, Tuple, List
 from dataclasses import dataclass
 
-from PySide6.QtCore import QThread, Signal, QObject
-from config import APP_VERSION, DEFAULT_GITHUB_REPO, GITHUB_API_BASE
+from PySide6.QtCore import QThread, Signal, QObject, QSettings
+from config import APP_VERSION, DEFAULT_GITHUB_REPO, GITHUB_API_BASE, DATA_DIR
 
 
 def parse_version(version_str: str) -> Tuple[int, ...]:
@@ -51,6 +51,140 @@ def is_newer_version(current_ver: str, remote_ver: str) -> bool:
     return rem_pad > curr_pad
 
 
+class VersionManager:
+    """
+    Менеджер версий кодовой базы, безопасного отката и Crash-Guard системы.
+    Позволяет хранить прошлые версии и обновляться легкими патчами (1-2 МБ).
+    """
+    VERSIONS_DIR = os.path.join(DATA_DIR, "versions")
+    MAX_STORED_VERSIONS = 3
+
+    @classmethod
+    def get_versions_dir(cls) -> str:
+        os.makedirs(cls.VERSIONS_DIR, exist_ok=True)
+        return cls.VERSIONS_DIR
+
+    @classmethod
+    def get_installed_versions(cls) -> List[str]:
+        """Возвращает список установленных локальных версий, отсортированных по убыванию."""
+        v_dir = cls.get_versions_dir()
+        versions = [APP_VERSION]
+        if os.path.exists(v_dir):
+            for d in os.listdir(v_dir):
+                d_path = os.path.join(v_dir, d)
+                if os.path.isdir(d_path) and (d.startswith("v") or d[0].isdigit()):
+                    v_str = d.lstrip("vV")
+                    if v_str not in versions:
+                        versions.append(v_str)
+
+        # Сортировка по убыванию версий
+        versions.sort(key=lambda v: parse_version(v), reverse=True)
+        return versions
+
+    @classmethod
+    def get_active_version(cls) -> str:
+        settings = QSettings("WaterMetrics", "VersionControl")
+        return settings.value("ActiveVersion", APP_VERSION, type=str)
+
+    @classmethod
+    def set_active_version(cls, version_str: str):
+        settings = QSettings("WaterMetrics", "VersionControl")
+        clean_v = version_str.lstrip("vV")
+        settings.setValue("ActiveVersion", clean_v)
+
+    @classmethod
+    def install_patch(cls, zip_path: str, version_str: str) -> bool:
+        """Распаковывает легкий zip-патч в папку новой версии и активирует ее."""
+        import zipfile
+        try:
+            clean_v = version_str.lstrip("vV")
+            target_dir = os.path.join(cls.get_versions_dir(), f"v{clean_v}")
+            os.makedirs(target_dir, exist_ok=True)
+
+            with zipfile.ZipFile(zip_path, 'r') as z:
+                z.extractall(target_dir)
+
+            cls.set_active_version(clean_v)
+            cls.cleanup_old_versions()
+            return True
+        except Exception as e:
+            print(f"[VersionManager] Ошибка установки патча: {e}")
+            return False
+
+    @classmethod
+    def cleanup_old_versions(cls):
+        """Удаляет старые версии, оставляя только последние MAX_STORED_VERSIONS."""
+        import shutil
+        installed = cls.get_installed_versions()
+        active = cls.get_active_version()
+        to_keep = set(installed[:cls.MAX_STORED_VERSIONS])
+        to_keep.add(active)
+        to_keep.add(APP_VERSION)
+
+        v_dir = cls.get_versions_dir()
+        if os.path.exists(v_dir):
+            for d in os.listdir(v_dir):
+                d_clean = d.lstrip("vV")
+                if d_clean not in to_keep:
+                    full_p = os.path.join(v_dir, d)
+                    try:
+                        shutil.rmtree(full_p, ignore_errors=True)
+                    except Exception:
+                        pass
+
+    @classmethod
+    def rollback_to_previous_version(cls) -> Optional[str]:
+        """Откатывает активную версию на предыдущую стабильную."""
+        installed = cls.get_installed_versions()
+        current = cls.get_active_version()
+
+        try:
+            idx = installed.index(current)
+            if idx + 1 < len(installed):
+                fallback = installed[idx + 1]
+                cls.set_active_version(fallback)
+                return fallback
+        except ValueError:
+            pass
+
+        if installed:
+            fallback = installed[-1]
+            cls.set_active_version(fallback)
+            return fallback
+        return None
+
+    @classmethod
+    def crash_guard_mark_starting(cls, version_str: str):
+        """Фиксирует начало запуска версии."""
+        settings = QSettings("WaterMetrics", "CrashGuard")
+        settings.setValue("Status", "STARTING")
+        settings.setValue("Version", version_str.lstrip("vV"))
+
+    @classmethod
+    def crash_guard_mark_success(cls):
+        """Фиксирует успешный старт программы (окно открыто)."""
+        settings = QSettings("WaterMetrics", "CrashGuard")
+        settings.setValue("Status", "SUCCESS")
+
+    @classmethod
+    def crash_guard_check_crashed(cls) -> Optional[Tuple[str, str]]:
+        """
+        Проверяет, не упал ли прошлый запуск.
+        Если упал — автоматически откатывает на предыдущую версию.
+        Возвращает (failed_version, fallback_version) или None.
+        """
+        settings = QSettings("WaterMetrics", "CrashGuard")
+        status = settings.value("Status", "SUCCESS", type=str)
+        crashed_ver = settings.value("Version", APP_VERSION, type=str)
+
+        if status == "STARTING":
+            # Произошел сбой при предыдущем запуске!
+            fallback = cls.rollback_to_previous_version()
+            settings.setValue("Status", "RECOVERED")
+            return (crashed_ver, fallback or APP_VERSION)
+        return None
+
+
 @dataclass
 class GitHubReleaseInfo:
     tag_name: str
@@ -62,6 +196,7 @@ class GitHubReleaseInfo:
     asset_name: Optional[str] = None
     asset_download_url: Optional[str] = None
     asset_size: int = 0
+    is_patch: bool = False
 
 
 class GitHubUpdateChecker(QThread):
@@ -112,21 +247,32 @@ class GitHubUpdateChecker(QThread):
             html_url = data.get("html_url", f"https://github.com/{self.repo}/releases")
             assets = data.get("assets", [])
 
-            # Поиск подходящего ассета (.exe, .zip)
             chosen_asset_name = None
             chosen_download_url = None
             chosen_size = 0
+            is_patch = False
 
-            # 1. Приоритет прямому бинарнику WaterMetrics.exe (быстрое бесшовное обновление)
+            # 1. ПРИОРИТЕТ 1: Легкий zip-патч (WaterMetrics_v..._patch.zip, ~1.5 МБ) для мгновенного обновления
             for asset in assets:
                 name = asset.get("name", "")
-                if name.lower() == "watermetrics.exe":
+                if name.lower().endswith("_patch.zip") or "patch" in name.lower() and name.lower().endswith(".zip"):
                     chosen_asset_name = name
                     chosen_download_url = asset.get("browser_download_url")
                     chosen_size = asset.get("size", 0)
+                    is_patch = True
                     break
 
-            # 2. Если standalone exe нет, ищем любой .exe (инсталлятор)
+            # 2. ПРИОРИТЕТ 2: Standalone .exe (WaterMetrics.exe)
+            if not chosen_download_url:
+                for asset in assets:
+                    name = asset.get("name", "")
+                    if name.lower() == "watermetrics.exe":
+                        chosen_asset_name = name
+                        chosen_download_url = asset.get("browser_download_url")
+                        chosen_size = asset.get("size", 0)
+                        break
+
+            # 3. ПРИОРИТЕТ 3: Инсталлятор (.exe)
             if not chosen_download_url:
                 for asset in assets:
                     name = asset.get("name", "")
@@ -136,7 +282,7 @@ class GitHubUpdateChecker(QThread):
                         chosen_size = asset.get("size", 0)
                         break
 
-            # 3. Иначе .zip
+            # 4. Резерв: любой .zip
             if not chosen_download_url:
                 for asset in assets:
                     name = asset.get("name", "")
@@ -144,6 +290,7 @@ class GitHubUpdateChecker(QThread):
                         chosen_asset_name = name
                         chosen_download_url = asset.get("browser_download_url")
                         chosen_size = asset.get("size", 0)
+                        is_patch = True
                         break
 
             release_info = GitHubReleaseInfo(
@@ -155,7 +302,8 @@ class GitHubUpdateChecker(QThread):
                 html_url=html_url,
                 asset_name=chosen_asset_name,
                 asset_download_url=chosen_download_url,
-                asset_size=chosen_size
+                asset_size=chosen_size,
+                is_patch=is_patch
             )
 
             if is_newer_version(self.current_ver, tag_name):
@@ -248,26 +396,38 @@ class WindowsUpdateDeployer:
     """
 
     @staticmethod
-    def apply_update(downloaded_file: str) -> bool:
+    def apply_update(downloaded_file: str, version_str: str = "") -> bool:
         """
-        Запускает фоновый updater.bat, который ожидает завершения текущего процесса,
-        заменяет бинарник и перезапускает программу.
+        Применяет обновление (легкий zip-патч или полный бинарник/инсталлятор) и перезапускает программу.
         """
         try:
             is_frozen = getattr(sys, 'frozen', False)
             current_exe = sys.executable if is_frozen else os.path.abspath(sys.argv[0])
             current_pid = os.getpid()
 
-            # Если скачан установочный exe (installer), просто запускаем его
+            # 1. ОБРАБОТКА ЛЕГКОГО ZIP-ПАТЧА (~1.5 МБ)
+            if downloaded_file.lower().endswith(".zip"):
+                ok = VersionManager.install_patch(downloaded_file, version_str or APP_VERSION)
+                if not ok:
+                    return False
+                
+                # Перезапуск программы с новой версией
+                if is_frozen:
+                    subprocess.Popen([current_exe], close_fds=True)
+                else:
+                    subprocess.Popen([sys.executable, sys.argv[0]], close_fds=True)
+                return True
+
+            # 2. Если скачан установочный exe (installer), запускаем его
             if "setup" in os.path.basename(downloaded_file).lower() or "install" in os.path.basename(downloaded_file).lower():
                 subprocess.Popen([downloaded_file], shell=True)
                 return True
 
             if not is_frozen:
-                # В режиме исходного кода (Python) просто уведомляем пользователя о скачанном файле
+                # В режиме исходного кода (Python)
                 return True
 
-            # В режиме скомпилированного .exe генерируем bat-скрипт
+            # 3. В режиме прямого .exe бинарника генерируем bat-скрипт замены
             temp_dir = tempfile.gettempdir()
             bat_path = os.path.join(temp_dir, "watermetrics_apply_update.bat")
 

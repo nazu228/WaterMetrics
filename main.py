@@ -1,10 +1,20 @@
 # main.py
 import sys
 import os
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtGui import QSurfaceFormat, QIcon
+from config import APP_VERSION
+from services.updater_service import VersionManager
 from ui.main_window import MainWindow
 from ui.styles import DARK_AZURE_QSS
+
+def setup_modular_version_path():
+    """Подключает путь к активной модульной версии кода, если она была установлена как патч."""
+    active_ver = VersionManager.get_active_version()
+    v_dir = os.path.join(VersionManager.get_versions_dir(), f"v{active_ver}")
+    if os.path.isdir(v_dir) and v_dir not in sys.path:
+        sys.path.insert(0, v_dir)
+    return active_ver
 
 def get_asset_path(filename: str) -> str:
     if getattr(sys, 'frozen', False):
@@ -14,6 +24,9 @@ def get_asset_path(filename: str) -> str:
     return os.path.join(base_path, 'assets', filename)
 
 def main():
+    active_ver = setup_modular_version_path()
+    VersionManager.crash_guard_mark_starting(active_ver)
+
     if sys.platform == 'win32':
         try:
             import ctypes
@@ -41,6 +54,9 @@ def main():
         window.setWindowIcon(QIcon(icon_path))
         
     window.show()
+
+    # Фиксируем успешный запуск в Crash Guard
+    VersionManager.crash_guard_mark_success()
 
     sys.exit(app.exec())
 

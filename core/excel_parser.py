@@ -305,6 +305,35 @@ class ExcelManager:
                 logger(f"ExcelManager.extract_apartments_and_meters Ошибка: {e}", "ERROR")
             return {}
 
+    @staticmethod
+    def get_template_column_widths(template_path):
+        """Извлекает точные ширины столбцов и параметры форматирования из XML шаблона."""
+        widths = {}
+        default_width = None
+        try:
+            import zipfile
+            import xml.dom.minidom
+            with zipfile.ZipFile(template_path) as z:
+                sheet_names = [n for n in z.namelist() if n.startswith('xl/worksheets/sheet') and n.endswith('.xml')]
+                if sheet_names:
+                    xml_data = z.read(sheet_names[0])
+                    dom = xml.dom.minidom.parseString(xml_data)
+                    for sf in dom.getElementsByTagName('sheetFormatPr'):
+                        if sf.hasAttribute('defaultColWidth'):
+                            try:
+                                default_width = float(sf.getAttribute('defaultColWidth'))
+                            except Exception:
+                                pass
+                    for col in dom.getElementsByTagName('col'):
+                        min_col = int(col.getAttribute('min'))
+                        max_col = int(col.getAttribute('max'))
+                        width = float(col.getAttribute('width'))
+                        for c in range(min_col, max_col + 1):
+                            widths[c] = width
+        except Exception:
+            pass
+        return widths, default_width
+
     def extract_data(self, template_path, arcus_path, logger=None):
         """
         Основной метод загрузки данных.
@@ -313,6 +342,8 @@ class ExcelManager:
         """
         if logger:
             logger("ExcelManager.extract_data: Начало загрузки данных", "INFO")
+
+        self.template_column_widths, self.template_default_col_width = self.get_template_column_widths(template_path)
 
         wb = openpyxl.load_workbook(template_path, data_only=True)
         ws = wb.active
@@ -639,7 +670,15 @@ class ExcelManager:
 
         ws.merge_cells(start_row=sig_row, start_column=1, end_row=sig_row, end_column=total_cols)
 
-        # 7. Ширина колонок сохраняется строго из шаблона (без произвольных изменений)
+        # 7. Гарантированное сохранение ширины колонок в точности как в исходном шаблоне
+        if hasattr(self, 'template_column_widths') and self.template_column_widths:
+            for col in range(1, total_cols + 1):
+                col_letter = get_column_letter(col)
+                if col in self.template_column_widths:
+                    ws.column_dimensions[col_letter].width = self.template_column_widths[col]
+                elif self.template_default_col_width:
+                    ws.column_dimensions[col_letter].width = self.template_default_col_width
+
         try:
             wb.save(save_path)
         except PermissionError:

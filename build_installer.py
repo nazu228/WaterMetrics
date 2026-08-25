@@ -60,6 +60,34 @@ def build_inno_setup():
     print("[OK] Инсталлятор WaterMetrics_Setup_v1.0.1.exe успешно создан в dist/!")
 
 
+def build_patch_archive():
+    import zipfile
+    from config import APP_VERSION
+    print("=" * 60)
+    print(f"3. Создание легковесного zip-патча v{APP_VERSION} (1-2 МБ)...")
+    print("=" * 60)
+    os.makedirs(DIST_DIR, exist_ok=True)
+    patch_zip_path = os.path.join(DIST_DIR, f"WaterMetrics_v{APP_VERSION}_patch.zip")
+    
+    ignored_dirs = {'__pycache__', '.git', 'build', 'dist', '.vscode', '.idea', '.gemini', 'env', 'venv', '.venv'}
+    ignored_exts = {'.pyc', '.pyo', '.tmp', '.bak', '.swp', '.swo'}
+
+    with zipfile.ZipFile(patch_zip_path, 'w', zipfile.ZIP_DEFLATED) as z:
+        for root, dirs, files in os.walk(ROOT_DIR):
+            dirs[:] = [d for d in dirs if d not in ignored_dirs and not d.startswith('.')]
+            for f in files:
+                if any(f.endswith(ext) for ext in ignored_exts) or f in {'Thumbs.db', 'Desktop.ini', '.DS_Store'}:
+                    continue
+                full_p = os.path.join(root, f)
+                rel_p = os.path.relpath(full_p, ROOT_DIR)
+                z.write(full_p, rel_p)
+                
+    size_mb = os.path.getsize(patch_zip_path) / (1024 * 1024)
+    print(f"[OK] Zip-патч успешно создан: {patch_zip_path} ({size_mb:.2f} МБ)!")
+
+
 if __name__ == "__main__":
     build_pyinstaller()
     build_inno_setup()
+    build_patch_archive()
+    print("\n🎉 Все артефакты сборки готовы в папке dist/!")

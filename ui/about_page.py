@@ -13,7 +13,7 @@ from PySide6.QtCore import Qt, QSize, QSettings, Slot, QUrl
 from PySide6.QtGui import QMovie, QDesktopServices
 
 from config import APP_VERSION, DEFAULT_GITHUB_REPO
-from services.updater_service import GitHubUpdateChecker, GitHubReleaseInfo
+from services.updater_service import GitHubUpdateChecker, GitHubReleaseInfo, VersionManager
 from ui.dialogs.update_dialog import UpdateDialog
 from ui.dialogs.welcome_dialog import WelcomeSetupDialog
 from ui.styles import get_svg_icon, ThemeManager
@@ -454,8 +454,8 @@ class AboutPage(QWidget):
         self.appVer_label = QLabel(f"Версия: v{APP_VERSION} (PySide6 Apple Frosted Glass & 3D Wave Edition)")
         self.appVer_label.setStyleSheet("font-size: 12px; color: #94A3B8; font-weight: 600;")
 
-        btns = QHBoxLayout()
-        btns.setSpacing(10)
+        btns_row1 = QHBoxLayout()
+        btns_row1.setSpacing(10)
 
         self.btn_check_update = QPushButton("Проверить обновления", objectName="PrimaryButton")
         self.btn_check_update.setIcon(get_svg_icon("update", color="#020617" if not is_light else "#FFFFFF"))
@@ -469,6 +469,14 @@ class AboutPage(QWidget):
         self.btn_onboarding.setIcon(get_svg_icon("sparkles"))
         self.btn_onboarding.clicked.connect(self.restart_onboarding)
 
+        btns_row1.addWidget(self.btn_check_update)
+        btns_row1.addWidget(self.btn_welcome_setup)
+        btns_row1.addWidget(self.btn_onboarding)
+        btns_row1.addStretch()
+
+        btns_row2 = QHBoxLayout()
+        btns_row2.setSpacing(10)
+
         self.btn_feedback = QPushButton("Обратная связь", objectName="SecondaryButton")
         self.btn_feedback.setIcon(get_svg_icon("mail"))
         self.btn_feedback.clicked.connect(self.show_feedback_dialog)
@@ -481,16 +489,14 @@ class AboutPage(QWidget):
         self.btn_beach.setIcon(get_svg_icon("run"))
         self.btn_beach.clicked.connect(self.show_beach)
 
-        btns.addWidget(self.btn_check_update)
-        btns.addWidget(self.btn_welcome_setup)
-        btns.addWidget(self.btn_onboarding)
-        btns.addWidget(self.btn_feedback)
-        btns.addWidget(self.btn_donate)
-        btns.addWidget(self.btn_beach)
-        btns.addStretch()
+        btns_row2.addWidget(self.btn_feedback)
+        btns_row2.addWidget(self.btn_donate)
+        btns_row2.addWidget(self.btn_beach)
+        btns_row2.addStretch()
 
         info_lay.addWidget(self.appVer_label)
-        info_lay.addLayout(btns)
+        info_lay.addLayout(btns_row1)
+        info_lay.addLayout(btns_row2)
         layout.addWidget(self.info_card)
 
         # ==============================================================================
@@ -554,6 +560,23 @@ class AboutPage(QWidget):
         self.lbl_update_status = QLabel("Статус: нажмите «Проверить сейчас» для запроса последнего релиза с GitHub.")
         self.lbl_update_status.setStyleSheet("font-size: 12px; color: #94A3B8; font-weight: 600;")
         update_lay.addWidget(self.lbl_update_status)
+
+        # Версионность и безопасный откат
+        ver_mgmt_row = QHBoxLayout()
+        ver_mgmt_row.setSpacing(10)
+        installed_vers = VersionManager.get_installed_versions()
+        self.lbl_ver_hist = QLabel(f"Установленные версии: {', '.join(['v' + v for v in installed_vers])} (Активна: v{VersionManager.get_active_version()})")
+        self.lbl_ver_hist.setStyleSheet("font-size: 12px; color: #94A3B8;")
+
+        self.btn_rollback = QPushButton("↩ Откатить на прошлую версию", objectName="SecondaryButton")
+        self.btn_rollback.setIcon(get_svg_icon("refresh", color="#94A3B8"))
+        self.btn_rollback.setMinimumHeight(28)
+        self.btn_rollback.clicked.connect(self._on_rollback_clicked)
+        self.btn_rollback.setVisible(len(installed_vers) > 1)
+
+        ver_mgmt_row.addWidget(self.lbl_ver_hist, 1)
+        ver_mgmt_row.addWidget(self.btn_rollback)
+        update_lay.addLayout(ver_mgmt_row)
 
         layout.addWidget(self.update_card)
 
@@ -924,13 +947,256 @@ class AboutPage(QWidget):
         if hasattr(self, 'lbl_fb_subj_val'):
             self.lbl_fb_subj_val.setStyleSheet(f"color: {label_col}; font-size: 12px; font-weight: 500;")
 
+        # Стили кнопок обновлений и навигации (Высокая контрастность, читаемость в любых темах)
+        if curr_theme == "Как дома":
+            primary_btn_style = """
+                QPushButton {
+                    background-color: #0A246A;
+                    color: #FFFFFF;
+                    font-weight: bold;
+                    font-size: 12px;
+                    border: 1px solid #000000;
+                    border-radius: 3px;
+                    padding: 6px 16px;
+                    min-height: 24px;
+                }
+                QPushButton:hover {
+                    background-color: #163988;
+                }
+                QPushButton:disabled {
+                    background-color: #A0A0A0;
+                    color: #D0D0D0;
+                }
+            """
+            secondary_btn_style = """
+                QPushButton {
+                    background-color: #D4D0C8;
+                    color: #000000;
+                    font-weight: 500;
+                    font-size: 12px;
+                    border: 1px solid #7F9DB9;
+                    border-radius: 3px;
+                    padding: 6px 12px;
+                    min-height: 24px;
+                }
+                QPushButton:hover {
+                    background-color: #ECE9D8;
+                }
+            """
+            btn_text_color = "#FFFFFF"
+        elif curr_theme == "Pearl Light":
+            primary_btn_style = """
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #028090, stop:1 #00A896);
+                    color: #FFFFFF;
+                    font-weight: 700;
+                    font-size: 13px;
+                    border: none;
+                    border-radius: 10px;
+                    padding: 8px 18px;
+                    min-height: 24px;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00A896, stop:1 #028090);
+                }
+                QPushButton:disabled {
+                    background: #CBD5E1;
+                    color: #94A3B8;
+                }
+            """
+            secondary_btn_style = """
+                QPushButton {
+                    background-color: #F1F5F9;
+                    color: #0F172A;
+                    font-weight: 600;
+                    font-size: 13px;
+                    border: 1px solid #CBD5E1;
+                    border-radius: 10px;
+                    padding: 7px 14px;
+                    min-height: 20px;
+                }
+                QPushButton:hover {
+                    background-color: #E2E8F0;
+                    border-color: #028090;
+                    color: #028090;
+                }
+            """
+            btn_text_color = "#FFFFFF"
+        elif curr_theme == "Cyberpunk Neon":
+            primary_btn_style = """
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #FF007F, stop:1 #9D00FF);
+                    color: #FFFFFF;
+                    font-weight: 700;
+                    font-size: 13px;
+                    border: 1px solid #FF007F;
+                    border-radius: 10px;
+                    padding: 8px 18px;
+                    min-height: 24px;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #FF1493, stop:1 #B026FF);
+                    border-color: #00F2FE;
+                }
+                QPushButton:disabled {
+                    background: rgba(36, 5, 54, 0.6);
+                    color: #64748B;
+                    border-color: rgba(255, 0, 127, 0.3);
+                }
+            """
+            secondary_btn_style = """
+                QPushButton {
+                    background-color: rgba(255, 255, 255, 0.08);
+                    color: #F8FAFC;
+                    font-weight: 600;
+                    font-size: 13px;
+                    border: 1px solid rgba(255, 0, 127, 0.35);
+                    border-radius: 10px;
+                    padding: 7px 14px;
+                    min-height: 20px;
+                }
+                QPushButton:hover {
+                    background-color: rgba(255, 0, 127, 0.18);
+                    border-color: #FF007F;
+                    color: #FF007F;
+                }
+            """
+            btn_text_color = "#FFFFFF"
+        elif curr_theme == "Emerald Cyber":
+            primary_btn_style = """
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #059669, stop:1 #10B981);
+                    color: #020617;
+                    font-weight: 700;
+                    font-size: 13px;
+                    border: 1px solid #10B981;
+                    border-radius: 10px;
+                    padding: 8px 18px;
+                    min-height: 24px;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #10B981, stop:1 #34D399);
+                }
+                QPushButton:disabled {
+                    background: rgba(6, 38, 24, 0.6);
+                    color: #64748B;
+                    border-color: rgba(16, 185, 129, 0.3);
+                }
+            """
+            secondary_btn_style = """
+                QPushButton {
+                    background-color: rgba(255, 255, 255, 0.08);
+                    color: #F8FAFC;
+                    font-weight: 600;
+                    font-size: 13px;
+                    border: 1px solid rgba(16, 185, 129, 0.35);
+                    border-radius: 10px;
+                    padding: 7px 14px;
+                    min-height: 20px;
+                }
+                QPushButton:hover {
+                    background-color: rgba(16, 185, 129, 0.18);
+                    border-color: #10B981;
+                    color: #10B981;
+                }
+            """
+            btn_text_color = "#020617"
+        elif curr_theme == "Deep Violet Glass":
+            primary_btn_style = """
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7C3AED, stop:1 #A855F7);
+                    color: #FFFFFF;
+                    font-weight: 700;
+                    font-size: 13px;
+                    border: 1px solid #A855F7;
+                    border-radius: 10px;
+                    padding: 8px 18px;
+                    min-height: 24px;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8B5CF6, stop:1 #C084FC);
+                }
+                QPushButton:disabled {
+                    background: rgba(24, 10, 56, 0.6);
+                    color: #64748B;
+                    border-color: rgba(168, 85, 247, 0.3);
+                }
+            """
+            secondary_btn_style = """
+                QPushButton {
+                    background-color: rgba(255, 255, 255, 0.08);
+                    color: #F8FAFC;
+                    font-weight: 600;
+                    font-size: 13px;
+                    border: 1px solid rgba(168, 85, 247, 0.35);
+                    border-radius: 10px;
+                    padding: 7px 14px;
+                    min-height: 20px;
+                }
+                QPushButton:hover {
+                    background-color: rgba(168, 85, 247, 0.18);
+                    border-color: #A855F7;
+                    color: #A855F7;
+                }
+            """
+            btn_text_color = "#FFFFFF"
+        else: # Dark Tech Azure
+            primary_btn_style = """
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #028090, stop:0.5 #00A896, stop:1 #00F2FE);
+                    color: #020617;
+                    font-weight: 700;
+                    font-size: 13px;
+                    border: 1px solid #00F2FE;
+                    border-radius: 10px;
+                    padding: 8px 18px;
+                    min-height: 24px;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00A896, stop:1 #00F2FE);
+                    border-color: #FFFFFF;
+                }
+                QPushButton:disabled {
+                    background: rgba(30, 41, 59, 0.6);
+                    color: #64748B;
+                    border-color: rgba(0, 242, 254, 0.2);
+                }
+            """
+            secondary_btn_style = """
+                QPushButton {
+                    background-color: rgba(255, 255, 255, 0.08);
+                    color: #F8FAFC;
+                    font-weight: 600;
+                    font-size: 13px;
+                    border: 1px solid rgba(255, 255, 255, 0.15);
+                    border-radius: 10px;
+                    padding: 7px 14px;
+                    min-height: 20px;
+                }
+                QPushButton:hover {
+                    background-color: rgba(255, 255, 255, 0.16);
+                    border-color: #00F2FE;
+                    color: #00F2FE;
+                }
+            """
+            btn_text_color = "#020617"
+
         # Кнопки
         if hasattr(self, 'btn_check_update'):
-            self.btn_check_update.setIcon(get_svg_icon("update", color="#FFFFFF" if is_light else "#020617"))
+            self.btn_check_update.setStyleSheet(primary_btn_style)
+            self.btn_check_update.setIcon(get_svg_icon("update", color=btn_text_color))
         if hasattr(self, 'btn_card_check'):
-            self.btn_card_check.setIcon(get_svg_icon("update", color="#FFFFFF" if is_light else "#020617"))
+            self.btn_card_check.setStyleSheet(primary_btn_style)
+            self.btn_card_check.setIcon(get_svg_icon("update", color=btn_text_color))
+            self.btn_card_check.setMinimumWidth(160)
         if hasattr(self, 'btn_fb_mailto'):
-            self.btn_fb_mailto.setIcon(get_svg_icon("mail", color="#FFFFFF" if is_light else "#020617"))
+            self.btn_fb_mailto.setStyleSheet(primary_btn_style)
+            self.btn_fb_mailto.setIcon(get_svg_icon("mail", color=btn_text_color))
+
+        for sec_name in ('btn_welcome_setup', 'btn_onboarding', 'btn_feedback', 'btn_donate'):
+            if hasattr(self, sec_name):
+                getattr(self, sec_name).setStyleSheet(secondary_btn_style)
+
         if hasattr(self, 'btn_fb_gmail'):
             self.btn_fb_gmail.setIcon(get_svg_icon("external_link", color=chk_col))
         if hasattr(self, 'btn_fb_mailru'):
@@ -1211,3 +1477,18 @@ class AboutPage(QWidget):
         if dlg.exec() == QDialog.DialogCode.Accepted:
             if getattr(dlg, 'start_onboarding_requested', False) and win and hasattr(win, 'start_onboarding'):
                 win.start_onboarding(force=True)
+
+    def _on_rollback_clicked(self):
+        """Выполняет откат на предыдущую локальную версию."""
+        installed = VersionManager.get_installed_versions()
+        if len(installed) <= 1:
+            ToastNotification.show_toast(self, "Предыдущих версий не найдено", "INFO")
+            return
+
+        fallback = VersionManager.rollback_to_previous_version()
+        if fallback:
+            ToastNotification.show_toast(self, f"Откат на v{fallback} выполнен! Перезапустите приложение.", "SUCCESS")
+            if hasattr(self, 'lbl_ver_hist'):
+                self.lbl_ver_hist.setText(f"Установленные версии: {', '.join(['v' + v for v in VersionManager.get_installed_versions()])} (Активна: v{fallback})")
+            if hasattr(self, 'btn_rollback'):
+                self.btn_rollback.setVisible(len(VersionManager.get_installed_versions()) > 1)

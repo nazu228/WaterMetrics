@@ -38,6 +38,24 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer/setup_script.iss
 
+      - name: Build Lightweight Patch Zip
+        run: |
+          python -c "
+          import os, zipfile
+          from config import APP_VERSION
+          os.makedirs('dist', exist_ok=True)
+          patch_zip = f'dist/WaterMetrics_v{APP_VERSION}_patch.zip'
+          ignored = {'__pycache__', '.git', 'build', 'dist', '.vscode', '.idea', '.gemini', 'env', 'venv', '.venv'}
+          with zipfile.ZipFile(patch_zip, 'w', zipfile.ZIP_DEFLATED) as z:
+              for root, dirs, files in os.walk('.'):
+                  dirs[:] = [d for d in dirs if d not in ignored and not d.startswith('.')]
+                  for f in files:
+                      if not f.endswith(('.pyc', '.pyo', '.tmp', '.bak')) and f not in {'Thumbs.db', 'Desktop.ini'}:
+                          p = os.path.join(root, f)
+                          z.write(p, os.path.relpath(p, '.'))
+          print('Created patch:', patch_zip)
+          "
+
       - name: Create GitHub Release and Upload Assets
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
@@ -45,6 +63,7 @@ jobs:
           files: |
             dist/WaterMetrics.exe
             dist/WaterMetrics_Setup_*.exe
+            dist/WaterMetrics_v*_patch.zip
           generate_release_notes: true
           draft: false
           prerelease: false

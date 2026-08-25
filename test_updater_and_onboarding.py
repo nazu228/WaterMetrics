@@ -190,6 +190,30 @@ class TestOnboardingAndDemoData(unittest.TestCase):
             pass
 
 
+class TestVersionManagerAndCrashGuard(unittest.TestCase):
+    """Тестирование модульной версионности, отката и Crash Guard."""
+
+    def test_version_manager_installed_versions(self):
+        from services.updater_service import VersionManager
+        versions = VersionManager.get_installed_versions()
+        self.assertIn("1.0.1", versions)
+
+    def test_version_manager_active_version(self):
+        from services.updater_service import VersionManager
+        VersionManager.set_active_version("1.0.1")
+        self.assertEqual(VersionManager.get_active_version(), "1.0.1")
+
+    def test_crash_guard_flow(self):
+        from services.updater_service import VersionManager
+        # 1. Запуск
+        VersionManager.crash_guard_mark_starting("1.0.1")
+        # 2. Успех
+        VersionManager.crash_guard_mark_success()
+        # 3. Проверка отсутствия сбоя
+        crashed = VersionManager.crash_guard_check_crashed()
+        self.assertIsNone(crashed)
+
+
 if __name__ == "__main__":
     unittest.main()
 

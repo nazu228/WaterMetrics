@@ -110,8 +110,12 @@ class UpdateDialog(QDialog):
 
         if self.release_info.asset_size > 0:
             size_mb = self.release_info.asset_size / (1024 * 1024)
-            lbl_size = QLabel(f"Размер: {size_mb:.1f} МБ")
-            lbl_size.setStyleSheet("font-size: 12px; color: #64748B;")
+            if self.release_info.is_patch:
+                lbl_size = QLabel(f"⚡ Быстрый патч: {size_mb:.1f} МБ")
+                lbl_size.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {accent}; background: rgba(0, 216, 144, 0.12); padding: 3px 8px; border-radius: 6px;")
+            else:
+                lbl_size = QLabel(f"Размер: {size_mb:.1f} МБ")
+                lbl_size.setStyleSheet("font-size: 12px; color: #64748B;")
             ver_row.addWidget(lbl_size)
 
         layout.addLayout(ver_row)
@@ -269,14 +273,14 @@ class UpdateDialog(QDialog):
         self.progress_bar.setValue(100)
 
         # Вызов WindowsUpdateDeployer
-        ok = WindowsUpdateDeployer.apply_update(temp_file_path)
+        ok = WindowsUpdateDeployer.apply_update(temp_file_path, version_str=self.release_info.version)
         if ok:
             is_frozen = getattr(sys, 'frozen', False)
             if is_frozen:
                 ToastNotification.show_toast(self.parent() or self, "Перезапуск для применения обновления...", "SUCCESS")
                 QTimer.singleShot(1000, QApplication.quit)
             else:
-                ToastNotification.show_toast(self.parent() or self, f"Обновление сохранено: {os.path.basename(temp_file_path)}", "SUCCESS")
+                ToastNotification.show_toast(self.parent() or self, f"Обновление v{self.release_info.version} успешно установлено!", "SUCCESS")
                 self.accept()
         else:
             ToastNotification.show_toast(self, "Не удалось запустить скрипт обновления", "ERROR")
