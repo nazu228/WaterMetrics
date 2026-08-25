@@ -117,13 +117,33 @@ class GitHubUpdateChecker(QThread):
             chosen_download_url = None
             chosen_size = 0
 
+            # 1. Приоритет прямому бинарнику WaterMetrics.exe (быстрое бесшовное обновление)
             for asset in assets:
-                name = asset.get("name", "").lower()
-                if name.endswith(".exe") or name.endswith(".zip"):
-                    chosen_asset_name = asset.get("name")
+                name = asset.get("name", "")
+                if name.lower() == "watermetrics.exe":
+                    chosen_asset_name = name
                     chosen_download_url = asset.get("browser_download_url")
                     chosen_size = asset.get("size", 0)
-                    if name.endswith(".exe"):  # Приоритет исполняемому файлу
+                    break
+
+            # 2. Если standalone exe нет, ищем любой .exe (инсталлятор)
+            if not chosen_download_url:
+                for asset in assets:
+                    name = asset.get("name", "")
+                    if name.lower().endswith(".exe"):
+                        chosen_asset_name = name
+                        chosen_download_url = asset.get("browser_download_url")
+                        chosen_size = asset.get("size", 0)
+                        break
+
+            # 3. Иначе .zip
+            if not chosen_download_url:
+                for asset in assets:
+                    name = asset.get("name", "")
+                    if name.lower().endswith(".zip"):
+                        chosen_asset_name = name
+                        chosen_download_url = asset.get("browser_download_url")
+                        chosen_size = asset.get("size", 0)
                         break
 
             release_info = GitHubReleaseInfo(

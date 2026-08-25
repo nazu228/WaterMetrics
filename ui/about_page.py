@@ -1203,3 +1203,11 @@ class AboutPage(QWidget):
         win = self.window()
         if win and hasattr(win, 'start_onboarding'):
             win.start_onboarding(force=True)
+
+    def show_welcome_setup(self):
+        """Вызов мастера первичной настройки стилей, языка и 3D-волн."""
+        win = getattr(self, 'main_win', None) or self.window()
+        dlg = WelcomeSetupDialog(win, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            if getattr(dlg, 'start_onboarding_requested', False) and win and hasattr(win, 'start_onboarding'):
+                win.start_onboarding(force=True)
