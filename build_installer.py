@@ -42,8 +42,9 @@ def build_pyinstaller():
 
 
 def build_inno_setup():
+    from config import APP_VERSION
     print("=" * 60)
-    print("2. Сборка инсталлятора WaterMetrics_Setup_v1.0.1.exe...")
+    print(f"2. Сборка инсталлятора WaterMetrics_Setup_v{APP_VERSION}.exe...")
     print("=" * 60)
     iscc = find_inno_setup_compiler()
     if not iscc:
@@ -57,7 +58,7 @@ def build_inno_setup():
     if res.returncode != 0:
         print("[ERROR] Ошибка при компиляции Inno Setup.")
         sys.exit(1)
-    print("[OK] Инсталлятор WaterMetrics_Setup_v1.0.1.exe успешно создан в dist/!")
+    print(f"[OK] Инсталлятор WaterMetrics_Setup_v{APP_VERSION}.exe успешно создан в dist/!")
 
 
 def build_patch_archive():
