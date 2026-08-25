@@ -543,30 +543,36 @@ class ExcelManager:
 
         cur_r = last_ap_row + 1
 
-        # Шрифты и стили строго по шаблону Душистая 45+ (Таблица: Tahoma 8.5pt, Подпись: Tahoma 11pt)
-        font_main = Font(name="Tahoma", size=8.5, bold=False)
-        font_bold = Font(name="Tahoma", size=8.5, bold=True)
-        font_sig = Font(name="Tahoma", size=11.0, bold=False)
+        # 3. Эталонные стили и цвета колонок напрямую из строки данных шаблона (строка 6)
+        ref_row = 6 if ws.max_row >= 6 else (last_ap_row if last_ap_row > 0 else 1)
+        col_fonts = {c: copy(ws.cell(row=ref_row, column=c).font) for c in range(1, total_cols + 1)}
+        col_borders = {c: copy(ws.cell(row=ref_row, column=c).border) for c in range(1, total_cols + 1)}
+        col_fills = {c: copy(ws.cell(row=ref_row, column=c).fill) for c in range(1, total_cols + 1)}
+        col_num_fmts = {c: ws.cell(row=ref_row, column=c).number_format for c in range(1, total_cols + 1)}
 
-        thin_side = Side(border_style="thin", color="000000")
-        border_thin = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+        font_sig = Font(name="Tahoma", size=11.0, bold=False)
 
         align_left = Alignment(horizontal="left", vertical="center")
         align_right = Alignment(horizontal="right", vertical="center")
         align_center = Alignment(horizontal="center", vertical="center")
 
-        # 3. Вставка блока 'Закрытые ИПУ' (если они есть) — без заливки, стандартный шрифт Tahoma 8.5pt
+        # Вставка блока 'Закрытые ИПУ' (если они есть) с точными стилями колонок шаблона
         if closed_meters:
             ws.row_dimensions[cur_r].height = 17.25
             cell_hdr = ws.cell(row=cur_r, column=name_col)
             cell_hdr.value = "Закрытые ИПУ"
-            cell_hdr.font = font_main
+            if col_fonts.get(name_col):
+                cell_hdr.font = copy(col_fonts[name_col])
             cell_hdr.alignment = align_left
 
             for c in range(1, total_cols + 1):
                 cell = ws.cell(row=cur_r, column=c)
-                cell.border = border_thin
-                cell.font = font_main
+                if col_borders.get(c):
+                    cell.border = copy(col_borders[c])
+                if col_fonts.get(c):
+                    cell.font = copy(col_fonts[c])
+                if col_fills.get(c):
+                    cell.fill = copy(col_fills[c])
                 if c != name_col:
                     cell.value = None
 
@@ -584,14 +590,22 @@ class ExcelManager:
 
                 cell_name = ws.cell(row=cur_r, column=name_col)
                 cell_name.value = apt_display
-                cell_name.font = font_main
+                if col_fonts.get(name_col):
+                    cell_name.font = copy(col_fonts[name_col])
                 cell_name.alignment = align_left
-                cell_name.border = border_thin
+                if col_borders.get(name_col):
+                    cell_name.border = copy(col_borders[name_col])
 
                 for c in range(1, total_cols + 1):
                     cell = ws.cell(row=cur_r, column=c)
-                    cell.font = font_main
-                    cell.border = border_thin
+                    if col_fonts.get(c):
+                        cell.font = copy(col_fonts[c])
+                    if col_borders.get(c):
+                        cell.border = copy(col_borders[c])
+                    if col_fills.get(c):
+                        cell.fill = copy(col_fills[c])
+                    if col_num_fmts.get(c):
+                        cell.number_format = col_num_fmts[c]
                     if c != name_col:
                         cell.alignment = align_right
 
@@ -605,22 +619,28 @@ class ExcelManager:
 
                 cur_r += 1
 
-        # 4. Оформление и пересчет сумм в единственной итоговой строке 'Итого' (1:1 как в шаблоне)
+        # 4. Оформление и пересчет сумм в единственной итоговой строке 'Итого' (1:1 стили и цвета шаблона)
         tot_r = cur_r
         ws.row_dimensions[tot_r].height = 15.0
 
         for c in range(1, total_cols + 1):
             cell = ws.cell(row=tot_r, column=c)
             cell.value = None
-            cell.font = font_main
-            cell.border = border_thin
-            cell.fill = PatternFill(fill_type=None)
+            if col_fonts.get(c):
+                cell.font = copy(col_fonts[c])
+            if col_borders.get(c):
+                cell.border = copy(col_borders[c])
+            if col_fills.get(c):
+                cell.fill = copy(col_fills[c])
+            if col_num_fmts.get(c):
+                cell.number_format = col_num_fmts[c]
             if c != name_col:
                 cell.alignment = align_right
 
         cell_tot_lbl = ws.cell(row=tot_r, column=name_col)
         cell_tot_lbl.value = "Итого"
-        cell_tot_lbl.font = font_main
+        if col_fonts.get(name_col):
+            cell_tot_lbl.font = copy(col_fonts[name_col])
         cell_tot_lbl.alignment = align_left
 
         for m in meters:
