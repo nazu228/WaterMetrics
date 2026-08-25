@@ -173,4 +173,4 @@ class LogsPage(QWidget):
     def _clear_logs(self):
         self.raw_logs.clear()
         self.log_viewer.clear()
-        self.append_log("Консоль логов очищена.", "INFO")
+        ToastNotification.show_toast(self, "Консоль логов очищена", "INFO")

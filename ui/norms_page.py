@@ -1,15 +1,18 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit, QPushButton, QFrame
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, Signal
 from ui.styles import get_svg_icon, ThemeManager
 from ui.components.interactive import HoverGlassCard
 from ui.components.glass_icon import GlassIconWidget
 from ui.components.toast import ToastNotification
+from services.settings_service import SettingsService
 
 
 class NormsPage(QWidget):
-    """Страница редактирования нормативов с двухколоночным макетом и справкой."""
+    """Страница редактирования нормативов с персистентным сохранением и справкой."""
+
+    norms_changed = Signal(float, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -48,21 +51,37 @@ class NormsPage(QWidget):
         self.desc_label.setWordWrap(True)
         grid.addWidget(self.desc_label, 1, 0, 1, 2)
 
+        # Загрузка актуальных нормативов из SettingsService
+        saved_cold, saved_hot = SettingsService.get_norms()
+
         grid.addWidget(QLabel("Норматив ХВС (м³/чел):", objectName="FieldLabel"), 2, 0)
-        self.txt_norm_cold = QLineEdit("4.04")
+        self.txt_norm_cold = QLineEdit(str(saved_cold))
         self.txt_norm_cold.setMaximumWidth(140)
+        self.txt_norm_cold.setPlaceholderText("4.04")
         grid.addWidget(self.txt_norm_cold, 2, 1)
 
         grid.addWidget(QLabel("Норматив ГВС (м³/чел):", objectName="FieldLabel"), 3, 0)
-        self.txt_norm_hot = QLineEdit("2.65")
+        self.txt_norm_hot = QLineEdit(str(saved_hot))
         self.txt_norm_hot.setMaximumWidth(140)
+        self.txt_norm_hot.setPlaceholderText("2.65")
         grid.addWidget(self.txt_norm_hot, 3, 1)
 
-        btn_save = QPushButton("  Сохранить нормативы", objectName="PrimaryButton")
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        btn_save = QPushButton("  Сохранить", objectName="PrimaryButton")
         btn_save.setIcon(get_svg_icon("save", color="#020617"))
         btn_save.setMinimumHeight(36)
         btn_save.clicked.connect(self._save_norms)
-        grid.addWidget(btn_save, 4, 0, 1, 2)
+        btn_row.addWidget(btn_save, 2)
+
+        btn_reset = QPushButton("Сброс", objectName="SecondaryButton")
+        btn_reset.setMinimumHeight(36)
+        btn_reset.setToolTip("Сбросить к заводским нормативам (ХВС: 4.04, ГВС: 2.65)")
+        btn_reset.clicked.connect(self._reset_norms)
+        btn_row.addWidget(btn_reset, 1)
+
+        grid.addLayout(btn_row, 4, 0, 1, 2)
 
         content_row.addWidget(card_form)
 
@@ -109,6 +128,10 @@ class NormsPage(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
+        # Синхронизация полей ввода с актуальными сохраненными значениями
+        saved_cold, saved_hot = SettingsService.get_norms()
+        self.txt_norm_cold.setText(str(saved_cold))
+        self.txt_norm_hot.setText(str(saved_hot))
         self._update_theme_styles()
 
     def _update_theme_styles(self, theme_name: str = None):
@@ -131,4 +154,35 @@ class NormsPage(QWidget):
                 lt.setStyleSheet(f"color: {sub_color}; font-size: 11px;")
 
     def _save_norms(self):
-        ToastNotification.show_toast(self.window(), "Нормативы успешно сохранены и обновлены", "SUCCESS")
+        try:
+            val_c = float(self.txt_norm_cold.text().strip().replace(',', '.'))
+            val_h = float(self.txt_norm_hot.text().strip().replace(',', '.'))
+            if val_c <= 0 or val_h <= 0:
+                raise ValueError("Значения должны быть строго больше нуля")
+        except ValueError:
+            ToastNotification.show_toast(self.window(), "Введите корректные положительные числа!", "ERROR")
+            return
+
+        success = SettingsService.save_norms(val_c, val_h)
+        if success:
+            self.txt_norm_cold.setText(str(val_c))
+            self.txt_norm_hot.setText(str(val_h))
+            self.norms_changed.emit(val_c, val_h)
+            ToastNotification.show_toast(
+                self.window(),
+                f"Нормативы сохранены: ХВС = {val_c} м³, ГВС = {val_h} м³",
+                "SUCCESS"
+            )
+        else:
+            ToastNotification.show_toast(self.window(), "Не удалось сохранить нормативы", "ERROR")
+
+    def _reset_norms(self):
+        def_c, def_h = SettingsService.reset_norms_to_default()
+        self.txt_norm_cold.setText(str(def_c))
+        self.txt_norm_hot.setText(str(def_h))
+        self.norms_changed.emit(def_c, def_h)
+        ToastNotification.show_toast(
+            self.window(),
+            f"Нормативы сброшены: ХВС = {def_c} м³, ГВС = {def_h} м³",
+            "INFO"
+        )

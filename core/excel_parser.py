@@ -348,6 +348,14 @@ class ExcelManager:
         wb = openpyxl.load_workbook(template_path, data_only=True)
         ws = wb.active
 
+        # Сохранение текста оригинальной подписи из шаблона
+        self.template_sig_text = None
+        for r in range(ws.max_row, max(1, ws.max_row - 25), -1):
+            val = str(ws.cell(row=r, column=1).value or '')
+            if 'директор' in val.lower():
+                self.template_sig_text = val.strip()
+                break
+
         detail_row = next((cell.row for row in ws.iter_rows(min_row=1, max_row=20, max_col=50)
                            for cell in row if cell.value and any(kw in str(cell.value).lower() for kw in ['предыдущее', 'текущее', 'расход'])), None)
         if not detail_row:
@@ -697,7 +705,7 @@ class ExcelManager:
             cell.border = Border()
             cell.fill = PatternFill(fill_type=None)
 
-        sig_text = 'Директор ООО "Южный дом"  Бочарова В.М.               ___________________'
+        sig_text = getattr(self, 'template_sig_text', None) or 'Директор ООО "Южный город"  Бочарова В.М.               ____________________'
 
         sig_cell = ws.cell(row=sig_row, column=1)
         sig_cell.value = sig_text
@@ -718,6 +726,18 @@ class ExcelManager:
                     ws.column_dimensions[col_letter].width = self.template_column_widths[col]
                 elif self.template_default_col_width:
                     ws.column_dimensions[col_letter].width = self.template_default_col_width
+
+        # 9. Финальная комплексная валидация и авто-исправление оформления (ExcelFormatValidator)
+        try:
+            from core.excel_validator import ExcelFormatValidator
+            ExcelFormatValidator.auto_fix_and_validate(
+                ws,
+                total_cols=total_cols,
+                sig_text=sig_text,
+                template_widths=getattr(self, 'template_column_widths', None)
+            )
+        except Exception as ex:
+            pass
 
         try:
             wb.save(save_path)

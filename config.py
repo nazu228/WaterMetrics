@@ -11,10 +11,24 @@ DEFAULT_NORM_HOT: float = 2.65
 # Пути
 DATA_DIR: str = os.path.join(os.path.expanduser("~"), ".watermetrics")
 HISTORY_FILE: str = os.path.join(DATA_DIR, "history.json")
+SETTINGS_FILE: str = os.path.join(DATA_DIR, "settings.json")
 BACKUP_DIR: str = os.path.join(DATA_DIR, "backups")
 
+# Загрузка сохраненных нормативов из настроек
+try:
+    if os.path.exists(SETTINGS_FILE):
+        import json
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as _f:
+            _cfg_data = json.load(_f)
+            if "norm_cold" in _cfg_data and float(_cfg_data["norm_cold"]) > 0:
+                DEFAULT_NORM_COLD = float(_cfg_data["norm_cold"])
+            if "norm_hot" in _cfg_data and float(_cfg_data["norm_hot"]) > 0:
+                DEFAULT_NORM_HOT = float(_cfg_data["norm_hot"])
+except Exception:
+    pass
+
 # Версия приложения
-APP_VERSION: str = "1.0.23"
+APP_VERSION: str = "1.1.0"
 
 # Обновления через GitHub
 DEFAULT_GITHUB_REPO: str = "nazu228/WaterMetrics"

@@ -1953,8 +1953,14 @@ class ThemeManager:
         settings = QSettings("WaterMetrics", "ThemeSystem")
         settings.setValue("Theme", theme_name)
 
+        valid_callbacks = []
         for cb in cls.on_theme_changed:
             try:
                 cb(theme_name)
-            except Exception:
+                valid_callbacks.append(cb)
+            except (RuntimeError, ReferenceError):
+                # Объект C++ был удален, исключаем из списка
                 pass
+            except Exception:
+                valid_callbacks.append(cb)
+        cls.on_theme_changed = valid_callbacks

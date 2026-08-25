@@ -12,7 +12,7 @@ from typing import List
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QFrame, QLabel,
     QPushButton, QStackedWidget, QStatusBar, QProgressBar, QDialog,
-    QComboBox
+    QComboBox, QSizeGrip
 )
 from PySide6.QtCore import QThread, Signal, QPropertyAnimation, QEasingCurve, Qt, QSize, QSettings, QEvent, QTimer
 from PySide6.QtGui import QShortcut, QKeySequence
@@ -333,13 +333,32 @@ class CustomTitleBar(QFrame):
         self._drag_pos = None
         event.accept()
 
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            win = self.window()
+            if win:
+                if win.isMaximized():
+                    win.showNormal()
+                    self.btn_max.setText("☐")
+                else:
+                    win.showMaximized()
+                    self.btn_max.setText("❐")
+            event.accept()
+        else:
+            super().mouseDoubleClickEvent(event)
+
 
 class MainWindow(QMainWindow):
     """Главное окно приложения (Frameless Edition)."""
 
     def __init__(self):
         super().__init__()
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Window
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowMaximizeButtonHint
+        )
         self.setMouseTracking(True)
         self.resize(1120, 740)
         # Минимальный размер окна — предотвращает наслаивание панелей и уход текста за экран
@@ -408,6 +427,7 @@ class MainWindow(QMainWindow):
 
         self.status_bar = QStatusBar()
         self.status_bar.setObjectName("AppStatusBar")
+        self.status_bar.setSizeGripEnabled(True)
         self.setStatusBar(self.status_bar)
         self.status_label = QLabel("Система готова к работе")
         self.status_label.setObjectName("StatusLabel")
@@ -419,9 +439,13 @@ class MainWindow(QMainWindow):
         self.status_bar.addWidget(self.status_label)
         self.status_bar.addPermanentWidget(self.progress_bar)
 
+        self.size_grip = QSizeGrip(self)
+        self.status_bar.addPermanentWidget(self.size_grip)
+
         for btn in self.sidebar.nav_buttons:
             btn.clicked.connect(self._on_nav_clicked)
 
+        self.page_norms.norms_changed.connect(self._on_norms_changed)
         self.progress_overlay = CalculationProgressOverlay(self.ocean_bg)
 
         # Устанавливаем event filter океана на все дочерние виджеты
@@ -535,7 +559,15 @@ class MainWindow(QMainWindow):
             ToastNotification.show_toast(self, f"Зафиксировано замен: {len(self.closed_meters)}", "SUCCESS")
             self.page_main._update_kpi_metrics()
 
+    def _on_norms_changed(self, norm_cold: float, norm_hot: float):
+        if hasattr(self, 'page_logs'):
+            self.page_logs.append_log(f"Нормативы обновлены: ХВС={norm_cold:.3f} м³, ГВС={norm_hot:.3f} м³", "INFO")
+
     def run_calculation(self):
+        if hasattr(self, 'calc_worker') and self.calc_worker and self.calc_worker.isRunning():
+            ToastNotification.show_toast(self, "Расчет уже выполняется, пожалуйста, подождите...", "INFO")
+            return
+
         tpl = self.page_main.drop_tpl.file_path
         arc = self.page_main.drop_arc.file_path
         sav = self.page_main.txt_save.text()
@@ -550,6 +582,9 @@ class MainWindow(QMainWindow):
             add_val = float(self.page_main.txt_corr.text().replace(',', '.'))
             norm_c_val = float(self.page_norms.txt_norm_cold.text().replace(',', '.'))
             norm_h_val = float(self.page_norms.txt_norm_hot.text().replace(',', '.'))
+            if norm_c_val > 0 and norm_h_val > 0:
+                from services.settings_service import SettingsService
+                SettingsService.save_norms(norm_c_val, norm_h_val)
         except ValueError:
             ToastNotification.show_toast(self, "Ошибка в числовых параметрах ввода!", "ERROR")
             return
@@ -597,10 +632,27 @@ class MainWindow(QMainWindow):
         else:
             ToastNotification.show_toast(self, f"Ошибка расчета: {message}", "ERROR")
             self.page_main.water_gauge.set_level(0.0)
-            ToastNotification.show_toast(self, f"Ошибка: {message}", "ERROR")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                hwnd = int(self.winId())
+                GWL_STYLE = -16
+                WS_MINIMIZEBOX = 0x00020000
+                WS_MAXIMIZEBOX = 0x00010000
+                WS_SYSMENU = 0x00080000
+                user32 = ctypes.windll.user32
+                style = user32.GetWindowLongPtrW(hwnd, GWL_STYLE)
+                user32.SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU)
+            except Exception:
+                pass
 
     def changeEvent(self, event):
         if event.type() == QEvent.Type.WindowStateChange:
+            if hasattr(self, 'size_grip'):
+                self.size_grip.setVisible(not self.isMaximized())
             if self.isMinimized():
                 if hasattr(self, 'ocean_bg') and hasattr(self.ocean_bg, 'pause_animation'):
                     self.ocean_bg.pause_animation()

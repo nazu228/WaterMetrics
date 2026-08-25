@@ -147,11 +147,11 @@ class SmartNumericLineEdit(QLineEdit):
             for i, token in enumerate(tokens):
                 if i < len(target_fields):
                     target_fields[i].setText(token)
-                    QTimer.singleShot(0, target_fields[i].selectAll)
 
             last_filled_idx = min(start_idx + len(tokens) - 1, len(self.linked_fields) - 1)
             last_field = self.linked_fields[last_filled_idx]
             last_field.setFocus()
+            QTimer.singleShot(0, last_field.selectAll)
 
             ToastNotification.show_toast(
                 self.window(),

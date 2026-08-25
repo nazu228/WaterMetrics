@@ -45,9 +45,9 @@ def get_asset_path(filename: str) -> str:
         candidates.append(os.path.join(sys._MEIPASS, "assets", filename))
         candidates.append(os.path.join(sys._MEIPASS, filename))
 
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     candidates.append(os.path.join(base_dir, "assets", filename))
-    candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", filename))
+    candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", filename))
 
     cwd = os.getcwd()
     candidates.append(os.path.join(cwd, "assets", filename))
