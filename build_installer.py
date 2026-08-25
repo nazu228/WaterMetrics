@@ -91,4 +91,4 @@ if __name__ == "__main__":
     build_pyinstaller()
     build_inno_setup()
     build_patch_archive()
-    print("\n🎉 Все артефакты сборки готовы в папке dist/!")
+    print("\n[SUCCESS] All build artifacts are ready in dist/!")

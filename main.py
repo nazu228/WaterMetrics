@@ -9,12 +9,14 @@ from ui.main_window import MainWindow
 from ui.styles import DARK_AZURE_QSS
 
 def setup_modular_version_path():
-    """Подключает путь к активной модульной версии кода, если она была установлена как патч."""
+    """Подключает путь к модульной версии кода только в режиме скрипта."""
+    is_frozen = getattr(sys, 'frozen', False)
     active_ver = VersionManager.get_active_version()
-    v_dir = os.path.join(VersionManager.get_versions_dir(), f"v{active_ver}")
-    if os.path.isdir(v_dir) and v_dir not in sys.path:
-        sys.path.insert(0, v_dir)
-    return active_ver
+    if not is_frozen:
+        v_dir = os.path.join(VersionManager.get_versions_dir(), f"v{active_ver}")
+        if os.path.isdir(v_dir) and v_dir not in sys.path:
+            sys.path.insert(0, v_dir)
+    return APP_VERSION if is_frozen else active_ver
 
 def get_asset_path(filename: str) -> str:
     if getattr(sys, 'frozen', False):

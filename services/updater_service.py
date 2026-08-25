@@ -252,18 +252,10 @@ class GitHubUpdateChecker(QThread):
             chosen_size = 0
             is_patch = False
 
-            # 1. ПРИОРИТЕТ 1: Легкий zip-патч (WaterMetrics_v..._patch.zip, ~1.5 МБ) для мгновенного обновления
-            for asset in assets:
-                name = asset.get("name", "")
-                if name.lower().endswith("_patch.zip") or "patch" in name.lower() and name.lower().endswith(".zip"):
-                    chosen_asset_name = name
-                    chosen_download_url = asset.get("browser_download_url")
-                    chosen_size = asset.get("size", 0)
-                    is_patch = True
-                    break
+            is_frozen = getattr(sys, 'frozen', False)
 
-            # 2. ПРИОРИТЕТ 2: Standalone .exe (WaterMetrics.exe)
-            if not chosen_download_url:
+            if is_frozen:
+                # В режиме скомпилированного .exe: приоритет исполняемым файлам
                 for asset in assets:
                     name = asset.get("name", "")
                     if name.lower() == "watermetrics.exe":
@@ -272,26 +264,53 @@ class GitHubUpdateChecker(QThread):
                         chosen_size = asset.get("size", 0)
                         break
 
-            # 3. ПРИОРИТЕТ 3: Инсталлятор (.exe)
-            if not chosen_download_url:
-                for asset in assets:
-                    name = asset.get("name", "")
-                    if name.lower().endswith(".exe"):
-                        chosen_asset_name = name
-                        chosen_download_url = asset.get("browser_download_url")
-                        chosen_size = asset.get("size", 0)
-                        break
+                if not chosen_download_url:
+                    for asset in assets:
+                        name = asset.get("name", "")
+                        if name.lower().endswith(".exe"):
+                            chosen_asset_name = name
+                            chosen_download_url = asset.get("browser_download_url")
+                            chosen_size = asset.get("size", 0)
+                            break
 
-            # 4. Резерв: любой .zip
-            if not chosen_download_url:
+                if not chosen_download_url:
+                    for asset in assets:
+                        name = asset.get("name", "")
+                        if name.lower().endswith(".zip"):
+                            chosen_asset_name = name
+                            chosen_download_url = asset.get("browser_download_url")
+                            chosen_size = asset.get("size", 0)
+                            is_patch = True
+                            break
+            else:
+                # В режиме исходного кода Python: приоритет легкому zip-патчу
                 for asset in assets:
                     name = asset.get("name", "")
-                    if name.lower().endswith(".zip"):
+                    if name.lower().endswith("_patch.zip") or "patch" in name.lower() and name.lower().endswith(".zip"):
                         chosen_asset_name = name
                         chosen_download_url = asset.get("browser_download_url")
                         chosen_size = asset.get("size", 0)
                         is_patch = True
                         break
+
+                if not chosen_download_url:
+                    for asset in assets:
+                        name = asset.get("name", "")
+                        if name.lower().endswith(".zip"):
+                            chosen_asset_name = name
+                            chosen_download_url = asset.get("browser_download_url")
+                            chosen_size = asset.get("size", 0)
+                            is_patch = True
+                            break
+
+                if not chosen_download_url:
+                    for asset in assets:
+                        name = asset.get("name", "")
+                        if name.lower() == "watermetrics.exe" or name.lower().endswith(".exe"):
+                            chosen_asset_name = name
+                            chosen_download_url = asset.get("browser_download_url")
+                            chosen_size = asset.get("size", 0)
+                            break
 
             release_info = GitHubReleaseInfo(
                 tag_name=tag_name,
