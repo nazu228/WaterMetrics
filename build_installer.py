@@ -20,6 +20,8 @@ def find_inno_setup_compiler() -> str:
         r"C:\Program Files\Inno Setup 6\ISCC.exe",
         r"C:\Program Files (x86)\Inno Setup 5\ISCC.exe",
         r"C:\Program Files\Inno Setup 5\ISCC.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"),
+        r"C:\Users\admin\AppData\Local\Programs\Inno Setup 6\ISCC.exe",
         shutil.which("iscc") or "",
         shutil.which("ISCC.exe") or ""
     ]
