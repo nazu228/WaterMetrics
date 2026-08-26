@@ -96,6 +96,7 @@ class VersionManager:
     def install_patch(cls, zip_path: str, version_str: str) -> bool:
         """Распаковывает легкий zip-патч в папку новой версии и активирует ее."""
         import zipfile
+        import shutil
         try:
             clean_v = version_str.lstrip("vV")
             target_dir = os.path.join(cls.get_versions_dir(), f"v{clean_v}")
@@ -103,6 +104,24 @@ class VersionManager:
 
             with zipfile.ZipFile(zip_path, 'r') as z:
                 z.extractall(target_dir)
+
+            # Если архив содержит одну вложенную папку (как стандартный zipball GitHub)
+            entries = [e for e in os.listdir(target_dir) if not e.startswith('.')]
+            if len(entries) == 1:
+                single_sub = os.path.join(target_dir, entries[0])
+                if os.path.isdir(single_sub):
+                    for item in os.listdir(single_sub):
+                        dst = os.path.join(target_dir, item)
+                        if os.path.exists(dst):
+                            if os.path.isdir(dst):
+                                shutil.rmtree(dst, ignore_errors=True)
+                            else:
+                                os.remove(dst)
+                        shutil.move(os.path.join(single_sub, item), dst)
+                    try:
+                        shutil.rmtree(single_sub, ignore_errors=True)
+                    except Exception:
+                        pass
 
             cls.set_active_version(clean_v)
             cls.cleanup_old_versions()
@@ -312,6 +331,12 @@ class GitHubUpdateChecker(QThread):
                             chosen_size = asset.get("size", 0)
                             break
 
+            if not chosen_download_url:
+                # Всегда гарантируем прямое скачивание архива новой версии без перенаправления в браузер!
+                chosen_download_url = data.get("zipball_url") or f"https://github.com/{self.repo}/archive/refs/tags/{tag_name}.zip"
+                chosen_asset_name = f"WaterMetrics_{tag_name}.zip"
+                is_patch = True
+
             release_info = GitHubReleaseInfo(
                 tag_name=tag_name,
                 version=tag_name.lstrip('vV'),
@@ -429,12 +454,27 @@ class WindowsUpdateDeployer:
                 ok = VersionManager.install_patch(downloaded_file, version_str or APP_VERSION)
                 if not ok:
                     return False
-                
+
+                # В режиме исходного кода (Python) копируем файлы в рабочую директорию
+                if not is_frozen:
+                    import shutil
+                    clean_v = (version_str or APP_VERSION).lstrip("vV")
+                    target_dir = os.path.join(VersionManager.get_versions_dir(), f"v{clean_v}")
+                    if os.path.exists(target_dir):
+                        root_app_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+                        for item in os.listdir(target_dir):
+                            src_item = os.path.join(target_dir, item)
+                            dst_item = os.path.join(root_app_dir, item)
+                            if os.path.isdir(src_item) and item not in ('.git', '__pycache__', '.pytest_cache', 'versions'):
+                                shutil.copytree(src_item, dst_item, dirs_exist_ok=True)
+                            elif os.path.isfile(src_item):
+                                shutil.copy2(src_item, dst_item)
+
                 # Перезапуск программы с новой версией
                 if is_frozen:
                     subprocess.Popen([current_exe], close_fds=True)
                 else:
-                    subprocess.Popen([sys.executable, sys.argv[0]], close_fds=True)
+                    subprocess.Popen([sys.executable, current_exe], close_fds=True)
                 return True
 
             # 2. Если скачан установочный exe (installer), запускаем его через ShellExecute (explorer.exe)
