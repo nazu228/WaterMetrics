@@ -404,19 +404,28 @@ class ExcelManager:
                 'prev': {}, 'consum': {},
                 'orig_fact': {'cold': False, 'hot': False},
                 'striked': {'cold': False, 'hot': False},
+                'striked_meters': {},
                 'is_empty': {},
                 'has_3dec': {}
             }
 
             # Сдвиг показаний для всех счетчиков абонента: Новые_Предыдущие = Старые_Текущие
             for m in meters:
-                curr_cell = ws.cell(row=r, column=m['cols']['curr']).value
-                prev_cell = ws.cell(row=r, column=m['cols']['prev']).value
+                curr_cell_obj = ws.cell(row=r, column=m['cols']['curr'])
+                prev_cell_obj = ws.cell(row=r, column=m['cols']['prev'])
+                curr_cell = curr_cell_obj.value
+                prev_cell = prev_cell_obj.value
                 val_to_use = curr_cell if (curr_cell is not None and str(curr_cell).strip() != '') else prev_cell
                 prev_val = ExcelManager.parse_float_safe(val_to_use)
 
-                ap['prev'][(m['type'], m['num'])] = prev_val
-                ap['consum'][(m['type'], m['num'])] = 0.0
+                m_key = (m['type'], m['num'])
+                ap['prev'][m_key] = prev_val
+                ap['consum'][m_key] = 0.0
+
+                # Проверка зачеркивания в шаблоне
+                if (curr_cell_obj.font and curr_cell_obj.font.strike) or (prev_cell_obj.font and prev_cell_obj.font.strike):
+                    ap['striked'][m['type']] = True
+                    ap['striked_meters'][m_key] = True
 
             all_rows[norm_name] = ap
 
@@ -447,6 +456,8 @@ class ExcelManager:
                 if arc_cols:
                     cell_cons = ws_arc.cell(row=r, column=arc_cols['cons'])
                     cell_val = cell_cons.value
+                    cell_curr = ws_arc.cell(row=r, column=arc_cols['curr']) if 'curr' in arc_cols else None
+                    cell_prev = ws_arc.cell(row=r, column=arc_cols['prev']) if 'prev' in arc_cols else None
 
                     is_empty = (cell_val is None or str(cell_val).strip() == '')
                     ap['is_empty'][key] = is_empty
@@ -467,8 +478,19 @@ class ExcelManager:
 
                     if val > 0.0001:
                         ap['orig_fact'][key[0]] = True
-                    if cell_cons.font and cell_cons.font.strike:
+
+                    # Проверка зачеркивания в Аркусе по любой из ячеек счетчика (расход, текущее, предыдущее)
+                    is_striked = False
+                    for c_obj in (cell_cons, cell_curr, cell_prev):
+                        if c_obj and c_obj.font and c_obj.font.strike:
+                            is_striked = True
+                            break
+
+                    if is_striked:
                         ap['striked'][key[0]] = True
+                        if 'striked_meters' not in ap:
+                            ap['striked_meters'] = {}
+                        ap['striked_meters'][key] = True
                 else:
                     ap['consum'][key] = 0.0
                     ap['is_empty'][key] = True
@@ -517,9 +539,17 @@ class ExcelManager:
                 cell_curr.value = curr_val
                 cell_cons.value = cons
 
-                p_font = cell_prev.font
-                if p_font and p_font.strike:
-                    nf = Font(name="Tahoma", size=8.5, strike=True, color=p_font.color)
+                # Применение зачеркивания (из Аркуса или Шаблона)
+                is_meter_striked = (
+                    ap.get('striked_meters', {}).get(key, False) or
+                    ap.get('striked', {}).get(m['type'], False) or
+                    bool(cell_prev.font and cell_prev.font.strike) or
+                    bool(cell_curr.font and cell_curr.font.strike)
+                )
+
+                if is_meter_striked:
+                    nf = Font(name="Tahoma", size=8.5, strike=True)
+                    cell_prev.font = nf
                     cell_curr.font = nf
                     cell_cons.font = nf
 

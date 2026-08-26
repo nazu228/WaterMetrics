@@ -202,6 +202,16 @@ class ExcelFormatValidator:
 
             ws.row_dimensions[r].height = 15.0
 
+            # Синхронизация зачеркивания по 3-колоночным блокам счетчиков (предыдущее, текущее, расход)
+            if not is_itogo_line and not is_closed_header:
+                for c_start in range(2, tot_cols + 1, 3):
+                    c_end = min(c_start + 2, tot_cols)
+                    meter_cells = [ws.cell(row=r, column=c) for c in range(c_start, c_end + 1)]
+                    if any(mc.font and mc.font.strike for mc in meter_cells if mc.value is not None and mc.value != ""):
+                        for mc in meter_cells:
+                            if mc.value is not None and mc.value != "":
+                                mc.font = copy(font_data_strike)
+
             for c in range(1, tot_cols + 1):
                 cell = ws.cell(row=r, column=c)
                 

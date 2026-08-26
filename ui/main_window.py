@@ -33,6 +33,7 @@ from ui.dialogs.command_palette import CommandPaletteDialog
 from ui.dialogs.welcome_dialog import WelcomeSetupDialog
 from ui.components.progress_overlay import CalculationProgressOverlay
 from ui.components.onboarding_overlay import OnboardingOverlay, OnboardingStep
+from ui.components.companion_dock import CompanionModeManager
 from ui.gl.ocean_widget import OceanWidget
 
 
@@ -273,6 +274,12 @@ class CustomTitleBar(QFrame):
         self.btn_palette.clicked.connect(self._on_palette_clicked)
         layout.addWidget(self.btn_palette)
 
+        self.btn_companion = QPushButton("[ ◨ Набивка ]", objectName="TitlePaletteBtn")
+        self.btn_companion.setToolTip("Режим набивки (Ghost Side-Dock) [F11 / Ctrl+D]")
+        self.btn_companion.setCursor(Qt.PointingHandCursor)
+        self.btn_companion.clicked.connect(self._on_companion_clicked)
+        layout.addWidget(self.btn_companion)
+
         layout.addStretch()
 
         self.btn_min = QPushButton("—")
@@ -297,6 +304,11 @@ class CustomTitleBar(QFrame):
         win = self.window()
         if win and hasattr(win, '_open_command_palette'):
             win._open_command_palette()
+
+    def _on_companion_clicked(self):
+        win = self.window()
+        if win and hasattr(win, 'toggle_companion_mode'):
+            win.toggle_companion_mode()
 
     def _on_min(self):
         win = self.window()
@@ -367,6 +379,7 @@ class MainWindow(QMainWindow):
         self.excel_manager = ExcelManager()
         self.closed_meters: List[ClosedMeterRecord] = []
         self.new_meters: List[NewMeterRecord] = []
+        self.companion_manager = CompanionModeManager(self)
 
         curr_theme = ThemeManager.get_current_theme_name()
         ThemeManager.apply_theme(curr_theme)
@@ -494,13 +507,24 @@ class MainWindow(QMainWindow):
     def _setup_shortcuts(self):
         QShortcut(QKeySequence("Ctrl+K"), self, self._open_command_palette)
         QShortcut(QKeySequence("Ctrl+P"), self, self._open_command_palette)
+        QShortcut(QKeySequence("F11"), self, self.toggle_companion_mode)
+        QShortcut(QKeySequence("Ctrl+D"), self, self.toggle_companion_mode)
         QShortcut(QKeySequence("Ctrl+R"), self, self.run_calculation)
         QShortcut(QKeySequence("F5"), self, self.run_calculation)
         QShortcut(QKeySequence("Ctrl+O"), self, self.page_main.drop_tpl.open_file_dialog)
         QShortcut(QKeySequence("Ctrl+L"), self, lambda: self.switch_page(2))
 
+    def toggle_companion_mode(self):
+        """Переключение между полноценным окном и правым доком режима набивки."""
+        if hasattr(self, 'companion_manager'):
+            if self.companion_manager.is_companion_active:
+                self.companion_manager.exit_companion_mode()
+            else:
+                self.companion_manager.enter_companion_mode()
+
     def _open_command_palette(self):
         actions = [
+            ("Режим набивки / Ghost Side-Dock (F11 / Ctrl+D)", "dashboard", self.toggle_companion_mode),
             ("Запустить расчет водопотребления (Ctrl+R / F5)", "run", self.run_calculation),
             ("Мастер первичной настройки (Стиль, Язык, 3D-волны)", "edit", self.open_welcome_setup),
             ("Запустить обучение (Мастер первой проводки)", "sparkles", lambda: self.start_onboarding(force=True)),

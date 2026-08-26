@@ -404,6 +404,12 @@ class MainDashboardPage(QWidget):
         self.btn_arcus_mode.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._prev_theme = ThemeManager.get_current_theme_name() if ThemeManager.get_current_theme_name() != "Как дома" else "Dark Tech Azure"
 
+        self.btn_companion_mode = QPushButton("◨ Режим набивки", objectName="SecondaryButton")
+        self.btn_companion_mode.setMinimumHeight(34)
+        self.btn_companion_mode.setToolTip("Включить режим набивки / Ghost Side-Dock (F11 / Ctrl+D)")
+        self.btn_companion_mode.clicked.connect(self._on_toggle_companion)
+        self.btn_companion_mode.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
         self.btn_reset_grid = QPushButton("Сбросить сетку", objectName="SecondaryButton")
         self.btn_reset_grid.setIcon(get_svg_icon("toggle"))
         self.btn_reset_grid.setToolTip("Сбросить положение и размеры карточек по умолчанию")
@@ -417,6 +423,7 @@ class MainDashboardPage(QWidget):
         self.btn_builder_mode.toggled.connect(self._on_builder_button_toggled)
         self.btn_builder_mode.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
+        header_lay.addWidget(self.btn_companion_mode)
         header_lay.addWidget(self.btn_arcus_mode)
         header_lay.addWidget(self.btn_reset_grid)
         header_lay.addWidget(self.btn_builder_mode)
@@ -703,6 +710,10 @@ class MainDashboardPage(QWidget):
             self.table_hist.removeRow(row)
             self._save_current_history()
             self._update_kpi_metrics()
+
+    def _on_toggle_companion(self):
+        if self.main_win and hasattr(self.main_win, 'toggle_companion_mode'):
+            self.main_win.toggle_companion_mode()
 
     def _on_arcus_mode_toggled(self, checked: bool):
         curr = ThemeManager.get_current_theme_name()

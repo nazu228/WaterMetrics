@@ -48,9 +48,27 @@ from OpenGL.GL import (
 from ui.styles import ThemeManager
 import ui.gl.wave_mesh_widget as _wm
 from ui.gl.wave_mesh_widget import THEMES, MeshTheme
+from ui.gl.ambient_boat import AmbientBoat
 
 _VERT = _wm.VERTEX_SHADER
 _FRAG = _wm.FRAGMENT_SHADER
+
+BOAT_VERT_SHADER = """
+#version 330 core
+layout(location = 0) in vec2 aPos;
+void main() {
+    gl_Position = vec4(aPos, 0.0, 1.0);
+}
+"""
+
+BOAT_FRAG_SHADER = """
+#version 330 core
+out vec4 fragColor;
+uniform vec4 uBoatColor;
+void main() {
+    fragColor = uBoatColor;
+}
+"""
 
 
 class CyberGridWidget(QOpenGLWidget):
@@ -93,6 +111,11 @@ class CyberGridWidget(QOpenGLWidget):
 
         tilt_deg = settings.value("WaveTilt", 48, type=int)
         self._custom_tilt: float | None = tilt_deg * 0.01
+
+        self._boat = AmbientBoat()
+        self._boat_program: QOpenGLShaderProgram | None = None
+        self._boat_vao: QOpenGLVertexArrayObject | None = None
+        self._boat_vbo: QOpenGLBuffer | None = None
 
         self.setMouseTracking(True)
 
@@ -234,6 +257,29 @@ class CyberGridWidget(QOpenGLWidget):
         self._vbo.release()
         self._program.release()
 
+        # Инициализация программы для кораблика
+        self._boat_program = QOpenGLShaderProgram(self)
+        self._boat_program.addShaderFromSourceCode(QOpenGLShader.ShaderTypeBit.Vertex, BOAT_VERT_SHADER)
+        self._boat_program.addShaderFromSourceCode(QOpenGLShader.ShaderTypeBit.Fragment, BOAT_FRAG_SHADER)
+        self._boat_program.link()
+
+        self._boat_vao = QOpenGLVertexArrayObject(self)
+        self._boat_vao.create()
+        self._boat_vao.bind()
+
+        self._boat_vbo = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
+        self._boat_vbo.create()
+        self._boat_vbo.bind()
+        self._boat_vbo.setUsagePattern(QOpenGLBuffer.UsagePattern.DynamicDraw)
+
+        self._boat_program.bind()
+        self._boat_program.enableAttributeArray(0)
+        self._boat_program.setAttributeBuffer(0, GL_FLOAT, 0, 2, 0)
+
+        self._boat_vao.release()
+        self._boat_vbo.release()
+        self._boat_program.release()
+
         self._elapsed.start()
         self._last_ns = self._elapsed.nsecsElapsed()
 
@@ -284,6 +330,32 @@ class CyberGridWidget(QOpenGLWidget):
         self._vao.release()
         self._program.release()
 
+        # Отрисовка 3D-кораблика на волнах (Idle Easter Egg)
+        if self._boat and self._boat_program and self._boat_vao and self._boat_vbo:
+            self._boat.update(dt)
+            boat_lines = self._boat.get_projected_lines(
+                self._time,
+                wave_amp=wave_amp,
+                wave_steep=t.wave_steep,
+                tilt=tilt
+            )
+            if len(boat_lines) > 0 and self._boat.alpha > 0.005:
+                self._boat_program.bind()
+                self._boat_vao.bind()
+                self._boat_vbo.bind()
+                self._boat_vbo.allocate(boat_lines.tobytes(), boat_lines.nbytes)
+
+                g_col = t.glow_color
+                boat_col = (g_col[0], g_col[1], g_col[2], float(g_col[3] * self._boat.alpha * 0.95))
+                loc = self._boat_program.uniformLocation("uBoatColor")
+                if loc != -1:
+                    glUniform4f(loc, *boat_col)
+                glDrawArrays(GL_LINES, 0, len(boat_lines))
+
+                self._boat_vbo.release()
+                self._boat_vao.release()
+                self._boat_program.release()
+
     def resizeGL(self, w: int, h: int):
         glViewport(0, 0, w, h)
 
@@ -298,6 +370,9 @@ class CyberGridWidget(QOpenGLWidget):
             if self._vbo: self._vbo.destroy()
             if self._vao: self._vao.destroy()
             if self._program: self._program.removeAllShaders()
+            if self._boat_vbo: self._boat_vbo.destroy()
+            if self._boat_vao: self._boat_vao.destroy()
+            if self._boat_program: self._boat_program.removeAllShaders()
         except Exception:
             pass
         self.doneCurrent()
@@ -324,6 +399,9 @@ class CyberGridWidget(QOpenGLWidget):
                 self._timer.start(25)
 
     def eventFilter(self, obj, event) -> bool:
+        if event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove, QEvent.Type.KeyPress, QEvent.Type.KeyRelease, QEvent.Type.Wheel):
+            if hasattr(self, '_boat') and self._boat:
+                self._boat.reset_idle()
         if event.type() not in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove, QEvent.Type.Enter, QEvent.Type.Leave):
             return super().eventFilter(obj, event)
         try:

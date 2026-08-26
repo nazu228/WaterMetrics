@@ -41,10 +41,61 @@ class WaterCalculator:
             return False
         return abs(val - round(val)) < 1e-5
 
-    def _is_fractional_meter(self, ap, key):
-        """Проверка, является ли расход счетчика дробным (val >= 0.2 м3 и не целое)."""
+    def _is_normative_value(self, val, norm_val):
+        """Проверка, является ли значение расхода нормативным (кратным нормативу, например 4.04, 8.08 или 2.65, 5.30)."""
+        if val is None or val < 0.2:
+            return False
+        # Проверка относительно переданного норматива
+        if norm_val and norm_val > 0.001:
+            ratio = val / norm_val
+            if abs(ratio - round(ratio)) < 0.001 and round(ratio) >= 1:
+                return True
+        # Проверка относительно стандартных эталонных нормативов (4.04 для ХВС, 2.65 для ГВС)
+        for std_norm in (4.04, 2.65):
+            ratio = val / std_norm
+            if abs(ratio - round(ratio)) < 0.001 and round(ratio) >= 1:
+                return True
+        return False
+
+    def _is_normative_meter(self, ap, key, norm_val=None):
+        """Проверка, является ли счетчик нормативным (расход кратен нормативу ХВС/ГВС)."""
         val = ap['consum'].get(key, 0.0)
         if val < 0.2:
+            return False
+        wtype = key[0] if isinstance(key, tuple) else 'cold'
+        if norm_val is None:
+            norm_val = round(float(getattr(self.config, f'norm_{wtype}', 4.04 if wtype == 'cold' else 2.65)), 3)
+        return self._is_normative_value(val, norm_val)
+
+    def _is_normative_apartment(self, ap, norm_cold=None, norm_hot=None):
+        """
+        Проверка, является ли квартира нормативной по исходным данным:
+        хотя бы один счетчик имеет нормативный расход (4.04, 2.65 или кратные),
+        а остальные ненулевые счетчики также нормативные.
+        """
+        if 'квартира' not in ap.get('norm_name', ''):
+            return False
+        has_any_norm = False
+        has_non_norm_positive = False
+
+        for key, val in ap.get('consum', {}).items():
+            if val < 0.2:
+                continue
+            wtype = key[0] if isinstance(key, tuple) else 'cold'
+            nval = norm_cold if wtype == 'cold' else norm_hot
+            if self._is_normative_meter(ap, key, nval):
+                has_any_norm = True
+            else:
+                has_non_norm_positive = True
+
+        return has_any_norm and not has_non_norm_positive
+
+    def _is_fractional_meter(self, ap, key):
+        """Проверка, является ли расход счетчика дробным (val >= 0.2 м3 и не целое, исключая нормативы)."""
+        val = ap['consum'].get(key, 0.0)
+        if val < 0.2:
+            return False
+        if self._is_normative_meter(ap, key):
             return False
         return not self._is_integer_meter(ap, key) or self._is_3dec_meter(ap, key) or self._is_prev_fractional_meter(ap, key)
 
@@ -79,13 +130,13 @@ class WaterCalculator:
         water_type = meters_list[0]['type']
         elig_pairs = []
 
-        # Закон 2: Исключаем нормативы Этапа 1, зачеркнутые и малые расходы < 0.2 м3
+        # Закон 2: Исключаем нормативы (включая предзаполненные), зачеркнутые и малые расходы < 0.2 м3
         for n, ap in rows_dict.items():
             if 'квартира' not in ap['norm_name']:
                 continue
             if ap['striked'].get(water_type, False):
                 continue
-            if ap.get('is_normative_stage1', False):
+            if ap.get('is_normative_stage1', False) or ap.get('is_existing_normative', False):
                 continue
             if not ap['orig_fact'].get(water_type, False):
                 continue
@@ -97,10 +148,8 @@ class WaterCalculator:
                 if val < 0.2:
                     continue
 
-                if m['num'] == 1 and norm_val > 0:
-                    ratio = val / norm_val
-                    if abs(ratio - round(ratio)) < 0.001 and round(ratio) > 0:
-                        continue
+                if self._is_normative_meter(ap, key, norm_val):
+                    continue
 
                 elig_pairs.append((n, key))
 
@@ -208,6 +257,23 @@ class WaterCalculator:
         f_key_cold = (m_cold[0]['type'], m_cold[0]['num']) if m_cold else None
         f_key_hot = (m_hot[0]['type'], m_hot[0]['num']) if m_hot else None
 
+        # Определение предзаполненных нормативных показаний из Аркуса (4.04, 2.65 или кратные)
+        existing_norm_apts = []
+        for n, ap in all_rows.items():
+            if 'квартира' not in ap['norm_name']:
+                continue
+            if self._is_normative_apartment(ap, NORM_COLD, NORM_HOT):
+                ap['is_normative_stage1'] = True
+                ap['is_existing_normative'] = True
+                existing_norm_apts.append(n)
+
+        if existing_norm_apts:
+            self.log(
+                f"Обнаружено предзаполненных нормативных квартир из Аркуса (4.04, 2.65 или кратные): "
+                f"{len(existing_norm_apts)} шт. Все они признаны нормативными и запечатаны по Закону 2.",
+                "INFO"
+            )
+
         # ==============================================================================
         # ЭТАП 1: ДВУХФАЗНОЕ СИНХРОННОЕ НАЧИСЛЕНИЕ НОРМАТИВОВ (ПО ЖИЛЬЦАМ)
         # ==============================================================================
@@ -225,6 +291,9 @@ class WaterCalculator:
         empty_apts = []
         for n, ap in all_rows.items():
             if 'квартира' not in ap['norm_name']:
+                continue
+
+            if ap.get('is_normative_stage1', False) or ap.get('is_existing_normative', False):
                 continue
 
             is_empty_c = all(ap['is_empty'].get((m['type'], m['num']), True) for m in m_cold) if m_cold else True
@@ -381,16 +450,14 @@ class WaterCalculator:
 
                 elig_h = []
                 for n, ap in iter_rows.items():
-                    if 'квартира' not in ap['norm_name'] or ap['striked'].get('hot', False) or ap.get('is_normative_stage1', False):
+                    if 'квартира' not in ap['norm_name'] or ap['striked'].get('hot', False) or ap.get('is_normative_stage1', False) or ap.get('is_existing_normative', False):
                         continue
                     for m in m_hot:
                         key = (m['type'], m['num'])
                         val = ap['consum'].get(key, 0.0)
                         if is_emerg_h or val >= 0.2 or (ap['orig_fact'].get('hot', False) and val >= 0.2):
-                            if m['num'] == 1 and NORM_HOT > 0:
-                                ratio = val / NORM_HOT
-                                if abs(ratio - round(ratio)) < 0.001 and round(ratio) > 0:
-                                    continue
+                            if self._is_normative_meter(ap, key, NORM_HOT):
+                                continue
                             elig_h.append((n, key))
 
                 if elig_h:
@@ -403,16 +470,14 @@ class WaterCalculator:
             if abs(d_cold) > 0.001 and m_cold:
                 elig_c = []
                 for n, ap in iter_rows.items():
-                    if 'квартира' not in ap['norm_name'] or ap['striked'].get('cold', False) or ap.get('is_normative_stage1', False):
+                    if 'квартира' not in ap['norm_name'] or ap['striked'].get('cold', False) or ap.get('is_normative_stage1', False) or ap.get('is_existing_normative', False):
                         continue
                     for m in m_cold:
                         key = (m['type'], m['num'])
                         val = ap['consum'].get(key, 0.0)
                         if (d_cold > 0 and (val >= 0.2 or ap['orig_fact'].get('cold', False))) or (d_cold < 0 and val >= 0.2):
-                            if m['num'] == 1 and NORM_COLD > 0:
-                                ratio = val / NORM_COLD
-                                if abs(ratio - round(ratio)) < 0.001 and round(ratio) > 0:
-                                    continue
+                            if self._is_normative_meter(ap, key, NORM_COLD):
+                                continue
                             elig_c.append((n, key))
 
                 if elig_c:
@@ -657,7 +722,7 @@ class WaterCalculator:
                 continue
             if ap['striked'].get(f_key_type, False):
                 continue
-            if ap.get('is_normative_stage1', False):  # Закон 2: Нормативы 100% запечатаны!
+            if ap.get('is_normative_stage1', False) or ap.get('is_existing_normative', False):  # Закон 2: Нормативы 100% запечатаны!
                 continue
 
             for m in m_list:
@@ -670,10 +735,8 @@ class WaterCalculator:
                 if self._is_integer_meter(ap, key):  # Закон 1: Целые запрещены для копеек
                     continue
 
-                if m['num'] == 1 and norm_val > 0:
-                    ratio = val / norm_val
-                    if abs(ratio - round(ratio)) < 0.001 and round(ratio) > 0:
-                        continue
+                if self._is_normative_meter(ap, key, norm_val):
+                    continue
 
                 pair = (n, key)
                 p2_pairs.append(pair)
