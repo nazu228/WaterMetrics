@@ -73,6 +73,7 @@ class MeterReplacementDialog(QDialog):
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.Dialog
+            | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.resize(680, 620)

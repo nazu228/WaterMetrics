@@ -1,6 +1,6 @@
-; Inno Setup Script for WaterMetrics Professional Edition v1.2.1
+; Inno Setup Script for WaterMetrics Professional Edition v1.2.11
 #define MyAppName "WaterMetrics"
-#define MyAppVersion "1.2.1"
+#define MyAppVersion "1.2.11"
 #define MyAppPublisher "WaterMetrics Team"
 #define MyAppURL "https://github.com/nazu228/WaterMetrics"
 #define MyAppExeName "WaterMetrics.exe"
@@ -17,7 +17,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=..\dist_installer
-OutputBaseFilename=WaterMetrics_Setup_v1.2.1
+OutputBaseFilename=WaterMetrics_Setup_v1.2.11
 SetupIconFile=..\assets\app_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/ultra64

@@ -177,6 +177,7 @@ class TestCompanionModeManagerFeatures(unittest.TestCase):
         from PySide6.QtCore import QSettings
         QSettings("WaterMetrics", "WaterMetricsApp").remove("companion/card_order")
         QSettings("WaterMetrics", "WaterMetricsApp").setValue("companion/dock_side", "right")
+        QSettings("WaterMetrics", "WaterMetricsApp").setValue("companion/is_pinned", False)
         self.dummy_main = DummyMainWin()
         self.mgr = CompanionModeManager(self.dummy_main)
         self.mgr.cards = [
@@ -430,6 +431,7 @@ class TestCompanionModeManagerFeatures(unittest.TestCase):
         self.assertTrue(self.mgr.watchdog_timer.isActive())
 
         # Искусственно создаем зависший флаг анимации
+        self.mgr.is_dock_expanded = True
         self.mgr.is_flight_animating = True
         self.mgr._animating_dock = True
         self.mgr._active_anim_group = None
@@ -491,6 +493,68 @@ class TestCompanionModeManagerFeatures(unittest.TestCase):
         closed, new = dlg.get_results()
         self.assertEqual(len(closed), 0)
         self.assertEqual(len(new), 0)
+
+    def test_dock_pinning_feature(self):
+        """Проверка функции закрепления (Pin) дока на экране."""
+        self.mgr.enter_companion_mode()
+        self.assertFalse(self.mgr.is_pinned)
+
+        # Переключаем закрепление
+        self.mgr.toggle_pin()
+        self.assertTrue(self.mgr.is_pinned)
+        self.assertTrue(self.mgr.is_dock_expanded)
+
+        # При активном пине парковка не срабатывает
+        self.mgr._park_all_cards_together()
+        self.assertTrue(self.mgr.is_dock_expanded)
+
+        # Снимаем закрепление
+        self.mgr.toggle_pin()
+        self.assertFalse(self.mgr.is_pinned)
+
+        self.mgr.exit_companion_mode()
+
+    def test_mini_floater_minimization_and_restoration(self):
+        """Проверка полного скрытия карточек в парящую мини-панель внизу экрана и восстановления."""
+        self.mgr.enter_companion_mode()
+        self.assertTrue(self.mgr.is_companion_active)
+
+        # Сворачиваем в мини-панель
+        self.mgr.minimize_to_mini_floater()
+        self.assertTrue(self.mgr.is_minimized_to_floater)
+        self.assertTrue(self.mgr.win_mini_floater.isVisible())
+        for card in self.mgr.cards:
+            self.assertFalse(card.isVisible())
+
+        # Восстанавливаем из мини-панели
+        self.mgr.restore_from_mini_floater()
+        self.assertFalse(self.mgr.is_minimized_to_floater)
+        self.assertFalse(self.mgr.win_mini_floater.isVisible())
+        for card in self.mgr.cards:
+            self.assertTrue(card.isVisible())
+        self.assertTrue(self.mgr.is_dock_expanded)
+
+        self.mgr.exit_companion_mode()
+
+    def test_system_tray_minimization_and_restoration(self):
+        """Проверка сворачивания в системный трей (область уведомлений) и восстановления."""
+        self.mgr.enter_companion_mode()
+        self.assertTrue(self.mgr.is_companion_active)
+
+        # Сворачиваем в трей
+        self.mgr.minimize_to_tray()
+        self.assertTrue(self.mgr.is_minimized_to_floater)
+        for card in self.mgr.cards:
+            self.assertFalse(card.isVisible())
+
+        # Восстанавливаем из трея
+        self.mgr.restore_from_tray()
+        self.assertFalse(self.mgr.is_minimized_to_floater)
+        for card in self.mgr.cards:
+            self.assertTrue(card.isVisible())
+        self.assertTrue(self.mgr.is_dock_expanded)
+
+        self.mgr.exit_companion_mode()
 
 
 class TestStrikethroughAndValidation(unittest.TestCase):

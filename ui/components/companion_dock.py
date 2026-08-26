@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QWidget, QFrame, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QSizePolicy, QApplication, QBoxLayout, QMenu,
-    QDialog, QFileDialog
+    QDialog, QFileDialog, QSystemTrayIcon
 )
 from PySide6.QtCore import (
     Qt, QTimer, QPoint, QRect, QSize, Signal, Slot, QPropertyAnimation,
@@ -317,46 +317,204 @@ class EdgeCompanionWindow(QFrame):
                 event.accept()
                 return
 
-        super().keyPressEvent(event)
+# ─── 0. ПАРЯЩАЯ МИНИ-ПАНЕЛЬ СНИЗУ ЭКРАНА ────────────────────────────────────────
+
+class CompanionMiniFloater(QFrame):
+    """
+    Компактная парящая стеклянная мини-панель внизу экрана,
+    появляющаяся при полном скрытии режима набивки.
+    """
+    restore_requested = Signal()
+
+    def __init__(self, manager=None, parent=None):
+        super().__init__(parent)
+        self.manager = manager
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setFixedSize(280, 42)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Режим набивки свернут. Нажмите, чтобы развернуть карточки (F11 / Ctrl+D)")
+        self.init_ui()
+
+    def init_ui(self):
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(10, 4, 10, 4)
+        lay.setSpacing(8)
+
+        accent = ThemeManager.get_current_accent_color()
+        self.icon_badge = GlassIconWidget("droplet", color=accent, size=QSize(22, 22))
+        lay.addWidget(self.icon_badge)
+
+        self.lbl_text = QLabel("⚡ WaterMetrics: Набивка")
+        self.lbl_text.setStyleSheet("font-size: 11px; font-weight: bold; color: #F8FAFC; background: transparent;")
+        lay.addWidget(self.lbl_text, 1)
+
+        self.btn_expand = QPushButton("◨ Развернуть")
+        self.btn_expand.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255, 255, 255, 0.12);
+                color: {accent};
+                border: 1px solid rgba(255, 255, 255, 0.20);
+                border-radius: 8px;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 4px 8px;
+            }}
+            QPushButton:hover {{
+                background: {accent};
+                color: #020617;
+                border: 1px solid {accent};
+            }}
+        """)
+        self.btn_expand.clicked.connect(self.restore_requested.emit)
+        lay.addWidget(self.btn_expand)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        rect = self.rect().adjusted(1, 1, -1, -1)
+        accent = ThemeManager.get_current_accent_color()
+        curr_theme = ThemeManager.get_current_theme_name()
+        is_light = curr_theme in ("Pearl Light", "Как дома")
+
+        path = QPainterPath()
+        path.addRoundedRect(rect, 14, 14)
+
+        if is_light:
+            grad = QLinearGradient(0, 0, 0, rect.height())
+            grad.setColorAt(0.0, QColor(255, 255, 255, 245))
+            grad.setColorAt(1.0, QColor(241, 245, 249, 245))
+            border_pen = QPen(QColor(accent), 1.5)
+        else:
+            grad = QLinearGradient(0, 0, 0, rect.height())
+            grad.setColorAt(0.0, QColor(15, 23, 42, 240))
+            grad.setColorAt(1.0, QColor(10, 16, 30, 245))
+            border_pen = QPen(QColor(accent), 1.5)
+
+        painter.setPen(border_pen)
+        painter.setBrush(QBrush(grad))
+        painter.drawPath(path)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.restore_requested.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
 
 # ─── 0. ВЕРХНЯЯ ПАНЕЛЬ НАСТРОЕК ─────────────────────────────────────────────────
 
 class CompanionTopSettingsBar(EdgeCompanionWindow):
-    """Верхняя управляющая панель с кнопками переключения стороны и возврата."""
+    """Верхняя управляющая панель с кнопками закрепления, переключения стороны, сворачивания в мини-панель и возврата."""
     restore_requested = Signal()
     switch_side_requested = Signal()
+    pin_toggled = Signal()
+    minimize_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(CardCategory.TOP_BAR, parent)
         self.init_ui()
 
     def init_ui(self):
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
+        self.root_layout.setContentsMargins(12, 10, 12, 10)
+        self.root_layout.setSpacing(6)
 
-        self.lbl_title = QLabel("⚡ Набивка", objectName="FieldLabel")
+        # ─── Строка 1: Заголовок + Закрепление + Сворачивание в трей ───
+        row1 = QHBoxLayout()
+        row1.setContentsMargins(0, 0, 0, 0)
+        row1.setSpacing(6)
+
+        self.lbl_title = QLabel("⚡ Режим набивки", objectName="FieldLabel")
         accent = ThemeManager.get_current_accent_color()
-        self.lbl_title.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {accent};")
+        self.lbl_title.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {accent};")
         self.lbl_title.setToolTip("Режим набивки WaterMetrics (F11 / Ctrl+D). Карточки можно перетаскивать по порядку.")
 
+        self.btn_pin = QPushButton(" Закрепить", objectName="SecondaryButton")
+        self.btn_pin.setIcon(get_svg_icon("unpin", color="#94A3B8"))
+        self.btn_pin.setMinimumHeight(26)
+        self.btn_pin.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_pin.setToolTip("Закрепить панели на экране (не уезжать за край)")
+        self.btn_pin.clicked.connect(self.pin_toggled.emit)
+
+        self.btn_min = QPushButton(" В трей", objectName="SecondaryButton")
+        self.btn_min.setIcon(get_svg_icon("tray", color="#94A3B8"))
+        self.btn_min.setMinimumHeight(26)
+        self.btn_min.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_min.setToolTip("Свернуть все панели в системный трей (область уведомлений)")
+        self.btn_min.clicked.connect(self.minimize_requested.emit)
+
+        row1.addWidget(self.lbl_title)
+        row1.addStretch()
+        row1.addWidget(self.btn_pin)
+        row1.addWidget(self.btn_min)
+
+        # ─── Строка 2: Переключение стороны + Возврат в главное окно ───
+        row2 = QHBoxLayout()
+        row2.setContentsMargins(0, 0, 0, 0)
+        row2.setSpacing(6)
+
         self.btn_side = QPushButton("⇄ Слева", objectName="SecondaryButton")
+        self.btn_side.setIcon(get_svg_icon("toggle", color="#94A3B8"))
         self.btn_side.setMinimumHeight(28)
+        self.btn_side.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_side.setToolTip("Переместить весь стек на противоположный край экрана (Слева / Справа)")
         self.btn_side.clicked.connect(self.switch_side_requested.emit)
 
-        self.btn_restore = QPushButton("⮌ В окно (F11)", objectName="AccentButton")
+        self.btn_restore = QPushButton("⮌ Вернуться в окно", objectName="AccentButton")
+        self.btn_restore.setIcon(get_svg_icon("window_restore", color="#020617"))
         self.btn_restore.setMinimumHeight(28)
+        self.btn_restore.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_restore.setToolTip("Вернуться в главное окно программы (F11 / Ctrl+D / Esc)")
         self.btn_restore.clicked.connect(self.restore_requested.emit)
 
-        row.addWidget(self.lbl_title)
-        row.addStretch()
-        row.addWidget(self.btn_side)
-        row.addWidget(self.btn_restore)
+        row2.addWidget(self.btn_side, 1)
+        row2.addWidget(self.btn_restore, 1)
 
-        self.root_layout.addLayout(row)
+        self.root_layout.addLayout(row1)
+        self.root_layout.addLayout(row2)
+
+    def update_pin_state(self, is_pinned: bool):
+        accent = ThemeManager.get_current_accent_color()
+        if is_pinned:
+            self.btn_pin.setText(" Закреплено")
+            self.btn_pin.setIcon(get_svg_icon("pin", color=accent))
+            self.btn_pin.setStyleSheet(f"""
+                QPushButton {{
+                    background: rgba(0, 242, 254, 0.25) !important;
+                    border: 1.5px solid {accent} !important;
+                    color: {accent} !important;
+                    border-radius: 6px;
+                    font-size: 11px;
+                    font-weight: 600;
+                    padding: 3px 8px;
+                }}
+            """)
+            self.btn_pin.setToolTip("Панели закреплены на экране (кликните, чтобы включить автоскрытие)")
+        else:
+            self.btn_pin.setText(" Закрепить")
+            self.btn_pin.setIcon(get_svg_icon("unpin", color="#94A3B8"))
+            self.btn_pin.setStyleSheet("""
+                QPushButton {
+                    background: rgba(255, 255, 255, 0.06);
+                    border: 1px solid rgba(255, 255, 255, 0.12);
+                    border-radius: 6px;
+                    color: #94A3B8;
+                    font-size: 11px;
+                    padding: 3px 8px;
+                }
+                QPushButton:hover {
+                    background: rgba(255, 255, 255, 0.15);
+                    border: 1px solid rgba(255, 255, 255, 0.25);
+                    color: #FFFFFF;
+                }
+            """)
+            self.btn_pin.setToolTip("Закрепить панели на экране (не уезжать за край)")
 
 
 # ─── 1. АУТЕНТИЧНАЯ КАРТОЧКА ФАЙЛОВ ─────────────────────────────────────────────
@@ -377,6 +535,9 @@ class AuthenticFilesWindow(EdgeCompanionWindow):
         self.init_ui()
 
     def init_ui(self):
+        self.root_layout.setContentsMargins(12, 8, 12, 8)
+        self.root_layout.setSpacing(6)
+
         hdr_row = QHBoxLayout()
         hdr_row.setSpacing(4)
         self.lbl_hdr = QLabel("⋮⋮  📁 Файлы и настройки", objectName="FieldLabel")
@@ -386,16 +547,18 @@ class AuthenticFilesWindow(EdgeCompanionWindow):
         self.root_layout.addLayout(hdr_row)
 
         self.drop_box = QBoxLayout(QBoxLayout.Direction.TopToBottom)
-        self.drop_box.setSpacing(8)
+        self.drop_box.setSpacing(6)
 
         self.drop_tpl = ExcelDropZone("Файл Шаблона", "Перетащите файл шаблона")
-        self.drop_tpl.setMinimumHeight(48)
+        self.drop_tpl.set_compact_mode(True)
+        self.drop_tpl.setFixedHeight(40)
         self.drop_tpl.get_initial_dir = self._get_template_initial_dir
         self.drop_tpl.get_dialog_title = self._get_template_dialog_title
         self.drop_tpl.file_dropped.connect(self._on_tpl_dropped)
 
         self.drop_arc = ExcelDropZone("Файл Аркус", "Перетащите файл Аркус")
-        self.drop_arc.setMinimumHeight(48)
+        self.drop_arc.set_compact_mode(True)
+        self.drop_arc.setFixedHeight(40)
         self.drop_arc.get_initial_dir = self._get_arcus_initial_dir
         self.drop_arc.get_dialog_title = self._get_arcus_dialog_title
         self.drop_arc.file_dropped.connect(self._on_arc_dropped)
@@ -407,15 +570,23 @@ class AuthenticFilesWindow(EdgeCompanionWindow):
         save_box = QHBoxLayout()
         save_box.setSpacing(6)
         self.lbl_save = QLabel("Сохранить:", objectName="FieldLabel")
+        self.lbl_save.setStyleSheet("font-size: 11px; font-weight: bold; color: #94A3B8;")
         self.txt_save = QLineEdit()
         self.txt_save.setPlaceholderText("Путь к итоговому файлу...")
-        self.txt_save.setMinimumHeight(28)
+        self.txt_save.setFixedHeight(30)
+        self.txt_save.setStyleSheet("""
+            QLineEdit {
+                padding: 4px 8px;
+                font-size: 11px;
+            }
+        """)
         self.txt_save.textChanged.connect(self._on_save_text_changed)
         self.txt_save.returnPressed.connect(self._on_save_return_pressed)
 
-        self.btn_browse = QPushButton("Обзор...", objectName="SecondaryButton")
+        self.btn_browse = QPushButton(" Обзор", objectName="SecondaryButton")
         self.btn_browse.setIcon(get_svg_icon("folder"))
-        self.btn_browse.setMinimumHeight(28)
+        self.btn_browse.setFixedHeight(30)
+        self.btn_browse.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_browse.clicked.connect(self._browse_save)
 
         save_box.addWidget(self.lbl_save)
@@ -425,7 +596,8 @@ class AuthenticFilesWindow(EdgeCompanionWindow):
 
         self.btn_repl = QPushButton("Мастер замен счетчиков", objectName="AccentButton")
         self.btn_repl.setIcon(get_svg_icon("replace"))
-        self.btn_repl.setMinimumHeight(28)
+        self.btn_repl.setFixedHeight(28)
+        self.btn_repl.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_repl.clicked.connect(self.replacement_clicked.emit)
         self.root_layout.addWidget(self.btn_repl)
 
@@ -509,20 +681,19 @@ class AuthenticFilesWindow(EdgeCompanionWindow):
         accent = ThemeManager.get_current_accent_color()
         if self.tpl_path:
             tpl_name = os.path.basename(self.tpl_path)
-            self.drop_tpl.set_highlight_state("linked", f"[ВЫБРАН] Шаблон: <b>{tpl_name}</b>")
+            self.drop_tpl.set_highlight_state("linked", f"✓ {tpl_name}")
         else:
             if self.arc_path:
-                self.drop_tpl.set_highlight_state("warning", "[ВНИМАНИЕ] Требуется выбрать шаблон!")
+                self.drop_tpl.set_highlight_state("warning", "⚠ Выберите шаблон!")
             else:
                 self.drop_tpl.set_highlight_state("default")
 
         if self.arc_path:
             arc_name = os.path.basename(self.arc_path)
             if self.tpl_path:
-                tpl_name = os.path.basename(self.tpl_path)
-                self.drop_arc.set_highlight_state("linked", f"[ВЫБРАН] Аркус: <b>{arc_name}</b><br/><span style='color:{accent};'>Связано с шаблоном: <b>{tpl_name}</b></span>")
+                self.drop_arc.set_highlight_state("linked", f"✓ {arc_name}")
             else:
-                self.drop_arc.set_highlight_state("warning", f"[ВЫБРАН] Аркус: <b>{arc_name}</b><br/><span style='color:#F87171;'>Шаблон не выбран!</span>")
+                self.drop_arc.set_highlight_state("warning", f"✓ {arc_name} (без шаблона)")
         else:
             self.drop_arc.set_highlight_state("default")
 
@@ -668,7 +839,7 @@ class AuthenticHistoryWindow(EdgeCompanionWindow):
         self.table_hist.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table_hist.setColumnWidth(0, 130)
         self.table_hist.verticalHeader().setVisible(False)
-        self.table_hist.setMinimumHeight(85)
+        self.table_hist.setFixedHeight(110)
         self.table_hist.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.table_hist.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table_hist.customContextMenuRequested.connect(self._show_context_menu)
@@ -982,18 +1153,26 @@ class CompanionModeManager:
             card.manager = self
 
         self.card_heights: Dict[EdgeCompanionWindow, int] = {
-            self.win_top_bar: 46,
-            self.win_files: 235,
+            self.win_top_bar: 80,
+            self.win_files: 215,
             self.win_values: 115,
-            self.win_hist: 200,
+            self.win_hist: 190,
             self.win_run: 56,
         }
-        self.card_spacing = 10
+        self.card_spacing = 12
         self.dock_width = 360
         self.parked_peek = 16
         self.is_dock_expanded = False
         self._animating_dock = False
         self._active_anim_group = None
+
+        self.is_pinned = False
+        self.is_minimized_to_floater = False
+        self.win_mini_floater = CompanionMiniFloater(manager=self)
+        self.win_mini_floater.restore_requested.connect(self.restore_from_mini_floater)
+
+        self.tray_icon = None
+        self._init_system_tray()
 
         self.proximity_timer = QTimer()
         self.proximity_timer.setInterval(30)
@@ -1012,6 +1191,66 @@ class CompanionModeManager:
         self._load_settings()
         self._connect_signals()
         ThemeManager.on_theme_changed.append(self.update_theme_styles)
+
+    def _init_system_tray(self):
+        """Инициализация иконки в системном трее Windows (область уведомлений)."""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        accent = ThemeManager.get_current_accent_color()
+        parent = self.main_win if isinstance(self.main_win, QWidget) else None
+        self.tray_icon = QSystemTrayIcon(parent)
+        self.tray_icon.setIcon(get_svg_icon("droplet", color=accent))
+        self.tray_icon.setToolTip("WaterMetrics — Режим набивки")
+
+        menu = QMenu()
+        menu.setStyleSheet("""
+            QMenu {
+                background: #0F172A;
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 8px;
+                padding: 4px;
+                color: #F8FAFC;
+                font-size: 12px;
+            }
+            QMenu::item {
+                padding: 6px 20px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background: rgba(0, 242, 254, 0.20);
+                color: #00F2FE;
+            }
+        """)
+
+        act_restore = menu.addAction("⚡ Развернуть режим набивки")
+        act_restore.triggered.connect(self.restore_from_tray)
+
+        act_main = menu.addAction("🗖 Открыть главное окно")
+        act_main.triggered.connect(self.exit_companion_mode)
+
+        act_pin = menu.addAction("📌 Закрепить / Открепить")
+        act_pin.triggered.connect(self.toggle_pin)
+
+        menu.addSeparator()
+
+        act_exit = menu.addAction("✕ Выход")
+        act_exit.triggered.connect(QApplication.quit)
+
+        self.tray_icon.setContextMenu(menu)
+        self.tray_icon.activated.connect(self._on_tray_activated)
+        self.tray_icon.show()
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason):
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
+            if self.is_companion_active:
+                if self.is_minimized_to_floater:
+                    self.restore_from_tray()
+                else:
+                    self.minimize_to_tray()
+            else:
+                self.main_win.show()
+                self.main_win.raise_()
+                self.main_win.activateWindow()
 
     def set_all_cards_flight_locked(self, locked: bool):
         """Блокирует или разблокирует ввод на всех карточках."""
@@ -1080,12 +1319,28 @@ class CompanionModeManager:
         apts_data = excel_manager.extract_apartments_and_meters(tpl_path)
 
         dlg = MeterReplacementDialog(
-            self.win_files,
+            None,
             apts_data,
             getattr(self.main_win, 'closed_meters', []),
             getattr(self.main_win, 'new_meters', [])
         )
-        dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        dlg.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Dialog
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
+
+        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        screen_geo = screen.availableGeometry()
+        dlg.resize(680, 620)
+        dlg.move(
+            screen_geo.left() + (screen_geo.width() - 680) // 2,
+            screen_geo.top() + (screen_geo.height() - 620) // 2
+        )
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
         if dlg.exec() == QDialog.DialogCode.Accepted:
             closed, new = dlg.get_results()
             if hasattr(self.main_win, 'closed_meters'):
@@ -1102,6 +1357,8 @@ class CompanionModeManager:
     def _connect_signals(self):
         self.win_top_bar.restore_requested.connect(self.exit_companion_mode)
         self.win_top_bar.switch_side_requested.connect(self.toggle_dock_side)
+        self.win_top_bar.pin_toggled.connect(self.toggle_pin)
+        self.win_top_bar.minimize_requested.connect(self.minimize_to_tray)
 
         self.win_files.template_changed.connect(self._sync_tpl_to_main)
         self.win_files.arcus_changed.connect(self._sync_arc_to_main)
@@ -1112,13 +1369,16 @@ class CompanionModeManager:
         self.win_run.run_requested.connect(self.run_calculation)
 
     def _load_settings(self):
-        """Загрузка настроек стороны дока и порядка карточек."""
+        """Загрузка настроек стороны дока, закрепления и порядка карточек."""
         settings = QSettings("WaterMetrics", "WaterMetricsApp")
         side_val = settings.value("companion/dock_side", "right")
         self.dock_side = DockSide.LEFT if side_val == "left" else DockSide.RIGHT
         self.win_top_bar.btn_side.setText("⇄ Справа" if self.dock_side == DockSide.LEFT else "⇄ Слева")
         for card in self.cards:
             card.dock_side = self.dock_side
+
+        self.is_pinned = settings.value("companion/is_pinned", False, type=bool)
+        self.win_top_bar.update_pin_state(self.is_pinned)
 
         saved_order = settings.value("companion/card_order", None)
         if saved_order and isinstance(saved_order, list):
@@ -1143,6 +1403,131 @@ class CompanionModeManager:
         else:
             self.cards = [self.win_top_bar, self.win_files, self.win_values, self.win_hist, self.win_run]
 
+    def toggle_pin(self):
+        """Переключение закрепления панелей на экране (Pinned <-> Auto-hide)."""
+        self.is_pinned = not self.is_pinned
+        settings = QSettings("WaterMetrics", "WaterMetricsApp")
+        settings.setValue("companion/is_pinned", self.is_pinned)
+        self.win_top_bar.update_pin_state(self.is_pinned)
+        if self.is_pinned:
+            self.is_dock_expanded = True
+            for c in self.cards:
+                c.is_dock_expanded = True
+            self._expand_dock_together()
+            self.show_toast("Панели закреплены на экране", "INFO")
+        else:
+            self.show_toast("Автоскрытие панелей включено", "INFO")
+            self._check_dock_proximity()
+
+    def minimize_to_tray(self):
+        """Сворачивает все панели режима набивки в системный трей (область уведомлений Windows)."""
+        if not self.is_companion_active or self.is_returning_to_window:
+            return
+
+        self.is_minimized_to_floater = True
+        self.proximity_timer.stop()
+        self.leave_timer.stop()
+
+        for card in self.cards:
+            card.hide()
+
+        if self.tray_icon and self.tray_icon.isSystemTrayAvailable():
+            self.tray_icon.show()
+            self.tray_icon.showMessage(
+                "WaterMetrics",
+                "Режим набивки свернут в системный трей (область уведомлений рядом с часами). Кликните по иконке для возврата!",
+                QSystemTrayIcon.MessageIcon.Information,
+                3000
+            )
+
+    def restore_from_tray(self):
+        """Восстанавливает все панели из системного трея."""
+        if not self.is_companion_active:
+            self.enter_companion_mode()
+            return
+
+        self.is_minimized_to_floater = False
+        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        screen_geo = screen.availableGeometry()
+        target_positions = self._calculate_dock_positions(screen_geo)
+        open_x = self._get_open_x(screen_geo)
+
+        for card in self.cards:
+            target_y = target_positions[card]
+            h = self._get_card_height(card)
+            card.setGeometry(QRect(open_x, target_y, self.dock_width, h))
+            card.base_docked_x = open_x
+            card.is_dock_expanded = True
+            card.show()
+
+        self.is_dock_expanded = True
+        self.set_all_cards_flight_locked(False)
+        self.raise_all_cards()
+        self.show_toast("Режим набивки развернут", "SUCCESS")
+        self.proximity_timer.start()
+
+    def minimize_to_mini_floater(self):
+        """Сворачивает все панели режима набивки в компактную мини-панель внизу экрана."""
+        if not self.is_companion_active or self.is_returning_to_window:
+            return
+
+        self.is_minimized_to_floater = True
+        self.proximity_timer.stop()
+        self.leave_timer.stop()
+
+        for card in self.cards:
+            card.hide()
+
+        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        screen_geo = screen.availableGeometry()
+
+        pill_w = self.win_mini_floater.width()
+        pill_h = self.win_mini_floater.height()
+
+        if self.dock_side == DockSide.LEFT:
+            pill_x = screen_geo.left() + 20
+        else:
+            pill_x = screen_geo.right() - pill_w - 20
+
+        pill_y = screen_geo.bottom() - pill_h - 16
+        self.win_mini_floater.setGeometry(QRect(pill_x, pill_y, pill_w, pill_h))
+        self.win_mini_floater.show()
+        self.win_mini_floater.raise_()
+
+        # Предупреждаем пользователя Toast-уведомлением
+        ToastNotification.show_toast(
+            self.win_mini_floater,
+            "Режим набивки свернут в мини-панель внизу экрана. Кликните для возврата!",
+            "INFO"
+        )
+
+    def restore_from_mini_floater(self):
+        """Восстанавливает все панели из мини-панели."""
+        if not self.is_minimized_to_floater:
+            return
+
+        self.is_minimized_to_floater = False
+        self.win_mini_floater.hide()
+
+        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        screen_geo = screen.availableGeometry()
+        target_positions = self._calculate_dock_positions(screen_geo)
+        open_x = self._get_open_x(screen_geo)
+
+        for card in self.cards:
+            target_y = target_positions[card]
+            h = self._get_card_height(card)
+            card.setGeometry(QRect(open_x, target_y, self.dock_width, h))
+            card.base_docked_x = open_x
+            card.is_dock_expanded = True
+            card.show()
+
+        self.is_dock_expanded = True
+        self.set_all_cards_flight_locked(False)
+        self.raise_all_cards()
+        self.show_toast("Режим набивки развернут", "SUCCESS")
+        self.proximity_timer.start()
+
     def _save_card_order(self):
         """Сохранение порядка контентных карточек."""
         settings = QSettings("WaterMetrics", "WaterMetricsApp")
@@ -1154,11 +1539,20 @@ class CompanionModeManager:
             win.update()
             if hasattr(win, '_update_file_linking_status'):
                 win._update_file_linking_status()
+        if hasattr(self, 'win_mini_floater'):
+            self.win_mini_floater.update()
 
     def _get_card_height(self, card: EdgeCompanionWindow) -> int:
         base_h = self.card_heights.get(card, 60)
-        hint_h = card.sizeHint().height()
-        return max(base_h, hint_h)
+        # Динамический расчет с защитой от Windows DPI scaling и шрифтов системы:
+        # Гарантирует, что высота окна ВСЕГДА больше или равна реальным требованиям контента
+        try:
+            min_h = card.minimumSizeHint().height() if hasattr(card, 'minimumSizeHint') else 0
+            layout_h = card.layout().sizeHint().height() if (hasattr(card, 'layout') and card.layout()) else 0
+            size_hint_h = card.sizeHint().height() if hasattr(card, 'sizeHint') else 0
+            return max(base_h, min_h, layout_h, size_hint_h)
+        except Exception:
+            return base_h
 
     def _get_open_x(self, screen_geo: QRect) -> int:
         if self.dock_side == DockSide.LEFT:
@@ -1319,8 +1713,9 @@ class CompanionModeManager:
             # РАЗБЛОКИРУЕМ ВЗАИМОДЕЙСТВИЕ: карточки встали на место и доступны на 1 секунду!
             self.set_all_cards_flight_locked(False)
             self.watchdog_timer.start()
-            # Оставляем открытыми на 1 СЕКУНДУ (1000 мс) перед грациозной парковкой
-            QTimer.singleShot(1000, self._park_all_cards_together)
+            if not self.is_pinned and not self.is_minimized_to_floater:
+                # Оставляем открытыми на 1 СЕКУНДУ (1000 мс) перед грациозной парковкой
+                QTimer.singleShot(1000, self._park_all_cards_together)
 
         group.finished.connect(on_open_flight_done)
         self._active_anim_group = group
@@ -1328,7 +1723,7 @@ class CompanionModeManager:
 
     def _park_all_cards_together(self):
         """Парковка всех 5 окон ЗА край экрана вместе."""
-        if not self.is_companion_active or self.is_returning_to_window:
+        if not self.is_companion_active or self.is_returning_to_window or self.is_pinned or self.is_minimized_to_floater:
             return
 
         if self._active_anim_group:
@@ -1373,7 +1768,7 @@ class CompanionModeManager:
         2. Разрешает любые спорные / зависшие состояния (сброс застрявших флагов анимации).
         3. Корректно выдвигает или задвигает док в зависимости от позиции курсора.
         """
-        if not self.is_companion_active or self.is_returning_to_window:
+        if not self.is_companion_active or self.is_returning_to_window or self.is_minimized_to_floater:
             return
 
         # Если идет реальный Drag&Drop карточки пользователем, не вмешиваемся
@@ -1392,9 +1787,15 @@ class CompanionModeManager:
 
     def _check_dock_proximity(self):
         """Проверка приближения/ухода мыши: плавный и стабильный выезд/заезд дока."""
-        if not self.is_companion_active or self.is_returning_to_window or self._animating_dock or self.is_flight_animating:
+        if not self.is_companion_active or self.is_returning_to_window or self._animating_dock or self.is_flight_animating or self.is_minimized_to_floater:
             return
         if any(c.is_dragging for c in self.cards):
+            return
+
+        # Если панели закреплены пользователем кнопкой 📌 — не уезжаем за край экрана!
+        if self.is_pinned:
+            if not self.is_dock_expanded and not self._animating_dock:
+                self._expand_dock_together()
             return
 
         cursor_pos = QCursor.pos()
@@ -1482,7 +1883,7 @@ class CompanionModeManager:
 
     def _collapse_dock_together(self):
         """Единый синхронный уезд ВСЕГО дока за край экрана."""
-        if not self.is_companion_active or self.is_returning_to_window:
+        if not self.is_companion_active or self.is_returning_to_window or self.is_pinned or self.is_minimized_to_floater:
             return
         if any(c.is_dragging for c in self.cards):
             return
@@ -1619,6 +2020,10 @@ class CompanionModeManager:
         if hasattr(self, 'watchdog_timer'):
             self.watchdog_timer.stop()
 
+        if hasattr(self, 'win_mini_floater') and self.win_mini_floater:
+            self.win_mini_floater.hide()
+        self.is_minimized_to_floater = False
+
         if self._active_anim_group:
             self._active_anim_group.stop()
 
@@ -1745,7 +2150,11 @@ class CompanionModeManager:
 
     def _calculate_dock_positions(self, screen_geo: QRect) -> Dict[EdgeCompanionWindow, int]:
         total_h = sum(self._get_card_height(c) for c in self.cards) + (len(self.cards) - 1) * self.card_spacing
-        start_y = screen_geo.top() + max(12, int((screen_geo.height() - total_h) / 2))
+        start_y = screen_geo.top() + max(8, int((screen_geo.height() - total_h) / 2))
+
+        # Предотвращение выезда за пределы нижней границы экрана
+        if start_y + total_h > screen_geo.bottom() - 10:
+            start_y = max(screen_geo.top() + 8, screen_geo.bottom() - total_h - 10)
 
         cur_y = start_y
         positions = {}

@@ -437,9 +437,15 @@ class WindowsUpdateDeployer:
                     subprocess.Popen([sys.executable, sys.argv[0]], close_fds=True)
                 return True
 
-            # 2. Если скачан установочный exe (installer), запускаем его
+            # 2. Если скачан установочный exe (installer), запускаем его через ShellExecute (explorer.exe)
             if "setup" in os.path.basename(downloaded_file).lower() or "install" in os.path.basename(downloaded_file).lower():
-                subprocess.Popen([downloaded_file], shell=True)
+                if sys.platform == 'win32':
+                    try:
+                        os.startfile(downloaded_file)
+                    except Exception:
+                        subprocess.Popen([downloaded_file], creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP, close_fds=True)
+                else:
+                    subprocess.Popen([downloaded_file])
                 return True
 
             if not is_frozen:
