@@ -570,18 +570,28 @@ class MainWindow(QMainWindow):
         for i, btn in enumerate(self.sidebar.nav_buttons):
             btn.setChecked(i == index)
 
-    def open_replacement_dialog(self):
+    def open_replacement_dialog(self, parent_widget=None):
         tpl_path = self.page_main.drop_tpl.file_path
+        if not tpl_path and hasattr(self, 'companion_manager'):
+            tpl_path = self.companion_manager.win_files.tpl_path
+
+        target_parent = parent_widget or (self if self.isVisible() else getattr(self.companion_manager, 'win_files', self))
+
         if not tpl_path or not os.path.exists(tpl_path):
-            ToastNotification.show_toast(self, "Сначала выберите файл шаблона!", "ERROR")
+            ToastNotification.show_toast(target_parent, "Сначала выберите файл шаблона!", "ERROR")
             return
 
         apts_data = self.excel_manager.extract_apartments_and_meters(tpl_path)
-        dlg = MeterReplacementDialog(self, apts_data, self.closed_meters, self.new_meters)
+        dlg = MeterReplacementDialog(target_parent, apts_data, self.closed_meters, self.new_meters)
+        if not self.isVisible():
+            dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.closed_meters, self.new_meters = dlg.get_results()
-            ToastNotification.show_toast(self, f"Зафиксировано замен: {len(self.closed_meters)}", "SUCCESS")
+            ToastNotification.show_toast(target_parent, f"Зафиксировано замен: {len(self.closed_meters)}", "SUCCESS")
             self.page_main._update_kpi_metrics()
+            if hasattr(self, 'companion_manager'):
+                self.companion_manager.update_replacements_badge()
 
     def _on_norms_changed(self, norm_cold: float, norm_hot: float):
         if hasattr(self, 'page_logs'):
@@ -650,11 +660,16 @@ class MainWindow(QMainWindow):
             self.progress_overlay.set_step(2)
             self.progress_overlay.setVisible(False)
 
+        if hasattr(self, 'companion_manager'):
+            self.companion_manager.on_calculation_finished(success, message)
+
         if success:
             self.page_main.water_gauge.set_level(1.0)
-            ToastNotification.show_toast(self, "Файл успешно сформирован!", "SUCCESS")
+            if self.isVisible():
+                ToastNotification.show_toast(self, "Файл успешно сформирован!", "SUCCESS")
         else:
-            ToastNotification.show_toast(self, f"Ошибка расчета: {message}", "ERROR")
+            if self.isVisible():
+                ToastNotification.show_toast(self, f"Ошибка расчета: {message}", "ERROR")
             self.page_main.water_gauge.set_level(0.0)
 
     def showEvent(self, event):

@@ -1,17 +1,34 @@
 """
-Диалоговое окно Мастера замен счетчиков.
-Содержит динамический поиск квартир, бейджи ХВС/ГВС, индикацию [✓ Замена],
-возможность редактирования записей и кнопку полного сброса.
+ui/dialogs/replacement_dialog.py — Премиальный безрамочный Мастер замен счетчиков (WaterMetrics).
+
+Реализует:
+1. Безрамочный стеклянный дизайн (Frameless Glassmorphism) без системной белой окантовки.
+2. Свободное перетаскивание окна за шапку или фон.
+3. 100% сохранение всех функций:
+   - Полнотекстовый и цифровой поиск помещений с естественной сортировкой (Natural Sorting).
+   - Индикаторы `[✓ Замена]` у квартир с уже зафиксированными заменами.
+   - Выбор прибора с отображением предыдущих показаний.
+   - Поля финального и начального показаний с числовой валидацией.
+   - Добавление, редактирование (подстановка в поля ввода), единичное удаление и полный сброс с подтверждением.
+   - Матовые интерактивные капсулы зафиксированных замен с иконками ХВС/ГВС и бейджами показаний.
+   - Адаптация под все темные и светлые темы оформления.
 """
 
+from __future__ import annotations
+
 import re
+from typing import List, Dict, Tuple, Optional
+
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit,
-    QPushButton, QScrollArea, QWidget, QFrame, QMessageBox
+    QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QComboBox, QLineEdit,
+    QPushButton, QScrollArea, QWidget, QFrame, QMessageBox, QApplication, QSizePolicy
 )
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, QPoint, QSize, QEvent
+from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QLinearGradient, QPainterPath
+
 from models import ClosedMeterRecord, NewMeterRecord
 from ui.styles import get_svg_icon, ThemeManager
+from ui.components.glass_icon import GlassIconWidget
 from ui.components.toast import ToastNotification
 
 
@@ -45,127 +62,323 @@ def _get_apt_score(apt: str, query: str) -> int:
 
 
 class MeterReplacementDialog(QDialog):
-    """Мастер замен ИПУ с поиском и динамической фильтрацией."""
+    """
+    Премиальный безрамочный Мастер замен ИПУ с поиском,
+    редактированием и динамической фильтрацией.
+    """
 
     def __init__(self, parent=None, apts_data=None, closed_meters=None, new_meters=None):
         super().__init__(parent)
         self.setWindowTitle("Мастер замен счетчиков ИПУ")
-        self.resize(640, 560)
-        self.apts_data = apts_data or {}
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Dialog
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.resize(680, 620)
 
+        self.apts_data = apts_data or {}
         self.closed_records = list(closed_meters or [])
         self.new_records = list(new_meters or [])
+        self._drag_pos: Optional[QPoint] = None
 
         self.init_ui()
 
+    def paintEvent(self, event):
+        """Отрисовка премиального матового фона со скругленными углами и неоновым контуром."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        rect = self.rect().adjusted(1, 1, -1, -1)
+        theme_name = ThemeManager.get_current_theme_name()
+        accent = ThemeManager.get_current_accent_color()
+        is_light = theme_name in ("Pearl Light", "Как дома")
+
+        path = QPainterPath()
+        path.addRoundedRect(rect, 14, 14)
+
+        if is_light:
+            grad = QLinearGradient(0, 0, 0, rect.height())
+            grad.setColorAt(0.0, QColor(255, 255, 255, 255))
+            grad.setColorAt(1.0, QColor(241, 245, 249, 252))
+            border_color = QColor(accent)
+            border_color.setAlpha(200)
+            glow_pen = QPen(border_color, 1.8)
+        else:
+            grad = QLinearGradient(0, 0, 0, rect.height())
+            grad.setColorAt(0.0, QColor(18, 28, 50, 252))
+            grad.setColorAt(1.0, QColor(15, 23, 42, 252))
+            border_color = QColor(accent)
+            border_color.setAlpha(180)
+            glow_pen = QPen(border_color, 1.8)
+
+        painter.setPen(glow_pen)
+        painter.setBrush(QBrush(grad))
+        painter.drawPath(path)
+
     def init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(14)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(20, 16, 20, 18)
+        root_layout.setSpacing(12)
 
-        lbl_title = QLabel("Управление закрытыми и новыми ИПУ", objectName="PageTitle")
-        layout.addWidget(lbl_title)
+        accent = ThemeManager.get_current_accent_color()
+        curr_theme = ThemeManager.get_current_theme_name()
+        is_light = curr_theme in ("Pearl Light", "Как дома")
 
+        # ─── 1. ШАПКА ДИАЛОГА (КАСТОМНЫЙ TITLEBAR) ──────────────────────────
+        header_row = QHBoxLayout()
+        header_row.setSpacing(10)
+
+        self.icon_badge = GlassIconWidget("replace", color=accent, size=QSize(36, 36))
+        header_row.addWidget(self.icon_badge)
+
+        title_vbox = QVBoxLayout()
+        title_vbox.setSpacing(1)
+
+        self.lbl_main_title = QLabel("Мастер замен счетчиков ИПУ")
+        title_color = "#0A246A" if curr_theme == "Как дома" else ("#0F172A" if is_light else "#F8FAFC")
+        self.lbl_main_title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {title_color}; background: transparent;")
+
+        self.lbl_subtitle = QLabel("Управление закрытыми и вновь установленными приборами учета")
+        self.lbl_subtitle.setStyleSheet("font-size: 11px; color: #94A3B8; background: transparent;")
+
+        title_vbox.addWidget(self.lbl_main_title)
+        title_vbox.addWidget(self.lbl_subtitle)
+        header_row.addLayout(title_vbox, 1)
+
+        # Кнопка закрытия [✕]
+        self.btn_close = QPushButton("✕")
+        self.btn_close.setFixedSize(28, 28)
+        self.btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_close.setToolTip("Закрыть окно (Esc)")
+        self.btn_close.setStyleSheet("""
+            QPushButton {
+                background: rgba(255, 255, 255, 0.06);
+                color: #94A3B8;
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 14px;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: rgba(239, 68, 68, 0.25);
+                color: #EF4444;
+                border: 1px solid rgba(239, 68, 68, 0.5);
+            }
+        """)
+        self.btn_close.clicked.connect(self.reject)
+        header_row.addWidget(self.btn_close)
+
+        root_layout.addLayout(header_row)
+
+        # ─── 2. ФОРМА ДОБАВЛЕНИЯ / РЕДАКТИРОВАНИЯ ───────────────────────────
         form_card = QFrame()
         form_card.setObjectName("GlassCard")
         form_layout = QVBoxLayout(form_card)
-        form_layout.setContentsMargins(14, 14, 14, 14)
+        form_layout.setContentsMargins(14, 12, 14, 12)
         form_layout.setSpacing(10)
 
-        # 0. Поиск квартир с иконкой лупы и автоматической кнопкой очистки
+        # Поиск помещения
         search_row = QHBoxLayout()
+        search_row.setSpacing(8)
+
         lbl_search_icon = QLabel()
-        lbl_search_icon.setPixmap(get_svg_icon("search").pixmap(18, 18))
+        lbl_search_icon.setPixmap(get_svg_icon("search", color=accent).pixmap(16, 16))
+        lbl_search_icon.setStyleSheet("background: transparent;")
         search_row.addWidget(lbl_search_icon)
 
-        search_row.addWidget(QLabel("Поиск помещения:", objectName="FieldLabel"))
+        lbl_search = QLabel("Поиск помещения:", objectName="FieldLabel")
+        lbl_search.setStyleSheet("font-size: 11px; font-weight: bold; color: #94A3B8; background: transparent;")
+        search_row.addWidget(lbl_search)
+
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Введите номер квартиры или название...")
         self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.setMinimumHeight(28)
         self.search_edit.textChanged.connect(self._on_search_text_changed)
         search_row.addWidget(self.search_edit, 1)
         form_layout.addLayout(search_row)
 
-        # 1. Выпадающий список квартир
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("Квартира:", objectName="FieldLabel"))
+        # Выбор квартиры и прибора в 2 колонки
+        select_grid = QHBoxLayout()
+        select_grid.setSpacing(10)
+
+        # Колонка Квартира
+        col_apt = QVBoxLayout()
+        col_apt.setSpacing(3)
+        lbl_apt = QLabel("Квартира / Помещение:", objectName="FieldLabel")
+        lbl_apt.setStyleSheet("font-size: 11px; font-weight: bold; color: #94A3B8; background: transparent;")
         self.combo_apt = QComboBox()
+        self.combo_apt.setMinimumHeight(28)
         self.combo_apt.currentTextChanged.connect(self._update_meters_combo)
-        row1.addWidget(self.combo_apt, 1)
-        form_layout.addLayout(row1)
+        col_apt.addWidget(lbl_apt)
+        col_apt.addWidget(self.combo_apt)
+        select_grid.addLayout(col_apt, 1)
 
-        # 2. Выбор прибора
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("Прибор:", objectName="FieldLabel"))
+        # Колонка Прибор
+        col_meter = QVBoxLayout()
+        col_meter.setSpacing(3)
+        lbl_meter = QLabel("Прибор учета:", objectName="FieldLabel")
+        lbl_meter.setStyleSheet("font-size: 11px; font-weight: bold; color: #94A3B8; background: transparent;")
         self.combo_meter = QComboBox()
+        self.combo_meter.setMinimumHeight(28)
         self.combo_meter.currentIndexChanged.connect(self._on_meter_selected)
-        row2.addWidget(self.combo_meter, 1)
-        form_layout.addLayout(row2)
+        col_meter.addWidget(lbl_meter)
+        col_meter.addWidget(self.combo_meter)
+        select_grid.addLayout(col_meter, 1)
 
-        # 3. Показания
-        row3 = QHBoxLayout()
-        row3.addWidget(QLabel("Финальное (старый):", objectName="FieldLabel"))
+        form_layout.addLayout(select_grid)
+
+        # Показания (Финальное старого и Начальное нового)
+        readings_grid = QHBoxLayout()
+        readings_grid.setSpacing(10)
+
+        col_fin = QVBoxLayout()
+        col_fin.setSpacing(3)
+        lbl_fin = QLabel("Финальное показание (старый ИПУ):", objectName="FieldLabel")
+        lbl_fin.setStyleSheet("font-size: 11px; font-weight: bold; color: #94A3B8; background: transparent;")
         self.txt_final = QLineEdit("0.0")
-        row3.addWidget(self.txt_final)
+        self.txt_final.setMinimumHeight(28)
+        col_fin.addWidget(lbl_fin)
+        col_fin.addWidget(self.txt_final)
+        readings_grid.addLayout(col_fin, 1)
 
-        row3.addWidget(QLabel("Начальное (новый):", objectName="FieldLabel"))
+        col_init = QVBoxLayout()
+        col_init.setSpacing(3)
+        lbl_init = QLabel("Начальное показание (новый ИПУ):", objectName="FieldLabel")
+        lbl_init.setStyleSheet("font-size: 11px; font-weight: bold; color: #94A3B8; background: transparent;")
         self.txt_initial = QLineEdit("0.0")
-        row3.addWidget(self.txt_initial)
+        self.txt_initial.setMinimumHeight(28)
+        col_init.addWidget(lbl_init)
+        col_init.addWidget(self.txt_initial)
+        readings_grid.addLayout(col_init, 1)
 
-        form_layout.addLayout(row3)
+        form_layout.addLayout(readings_grid)
 
-        btn_add = QPushButton("Добавить / Обновить замену", objectName="PrimaryButton")
-        btn_add.setIcon(get_svg_icon("plus", color="#020617"))
-        btn_add.clicked.connect(self._add_replacement)
-        form_layout.addWidget(btn_add)
+        # Кнопка Добавить / Обновить
+        self.btn_add = QPushButton("+ Добавить / Обновить замену", objectName="PrimaryButton")
+        self.btn_add.setIcon(get_svg_icon("plus", color="#020617"))
+        self.btn_add.setMinimumHeight(32)
+        self.btn_add.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_add.clicked.connect(self._add_replacement)
+        form_layout.addWidget(self.btn_add)
 
-        layout.addWidget(form_card)
+        root_layout.addWidget(form_card)
 
-        # Заголовок списка с кнопкой Сброса Всех замен
+        # ─── 3. СПИСОК ЗАФИКСИРОВАННЫХ ЗАМЕН ──────────────────────────────
         list_hdr_layout = QHBoxLayout()
-        list_hdr_layout.addWidget(QLabel("Зафиксированные замены:", objectName="SectionTitle"))
+        list_hdr_layout.setSpacing(8)
+
+        self.lbl_list_hdr = QLabel("Зафиксированные замены:", objectName="SectionTitle")
+        self.lbl_list_hdr.setStyleSheet("font-size: 12px; font-weight: bold; background: transparent;")
+        list_hdr_layout.addWidget(self.lbl_list_hdr)
+
+        self.lbl_count_badge = QLabel("(0)")
+        self.lbl_count_badge.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {accent}; background: transparent;")
+        list_hdr_layout.addWidget(self.lbl_count_badge)
+
         list_hdr_layout.addStretch()
 
-        btn_reset_all = QPushButton("Сбросить все", objectName="DangerButton")
-        btn_reset_all.setIcon(get_svg_icon("trash", color="#F87171"))
-        btn_reset_all.clicked.connect(self._reset_all)
-        list_hdr_layout.addWidget(btn_reset_all)
+        self.btn_reset_all = QPushButton("Сбросить все", objectName="DangerButton")
+        self.btn_reset_all.setIcon(get_svg_icon("trash", color="#F87171"))
+        self.btn_reset_all.setMinimumHeight(26)
+        self.btn_reset_all.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_reset_all.clicked.connect(self._reset_all)
+        list_hdr_layout.addWidget(self.btn_reset_all)
 
-        layout.addLayout(list_hdr_layout)
+        root_layout.addLayout(list_hdr_layout)
 
-        # Область списка
+        # Область прокрутки для карточек замен
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.scroll_area.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget { background: transparent !important; border: none; }")
+        self.scroll_area.setStyleSheet("""
+            QScrollArea {
+                background: transparent !important;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 8px;
+            }
+            QScrollArea > QWidget > QWidget {
+                background: transparent !important;
+            }
+        """)
 
         self.scroll_content = QWidget()
         self.scroll_content.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.scroll_layout = QVBoxLayout(self.scroll_content)
-        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
-        self.scroll_layout.setSpacing(8)
+        self.scroll_layout.setContentsMargins(6, 6, 6, 6)
+        self.scroll_layout.setSpacing(6)
         self.scroll_layout.addStretch()
 
         self.scroll_area.setWidget(self.scroll_content)
-        layout.addWidget(self.scroll_area, 1)
+        root_layout.addWidget(self.scroll_area, 1)
 
-        # Кнопки
+        # ─── 4. НИЖНЯЯ ПАНЕЛЬ ДЕЙСТВИЙ ─────────────────────────────────────
         btn_box = QHBoxLayout()
+        btn_box.setSpacing(10)
+
+        self.lbl_footer_info = QLabel("")
+        self.lbl_footer_info.setStyleSheet("font-size: 11px; color: #94A3B8; background: transparent;")
+        btn_box.addWidget(self.lbl_footer_info)
         btn_box.addStretch()
 
-        btn_cancel = QPushButton("Отмена", objectName="SecondaryButton")
-        btn_cancel.clicked.connect(self.reject)
+        self.btn_cancel = QPushButton("Отмена", objectName="SecondaryButton")
+        self.btn_cancel.setMinimumHeight(32)
+        self.btn_cancel.setMinimumWidth(90)
+        self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancel.clicked.connect(self.reject)
 
-        btn_save = QPushButton("Сохранить и применить", objectName="PrimaryButton")
-        btn_save.setIcon(get_svg_icon("save", color="#020617"))
-        btn_save.clicked.connect(self.accept)
+        self.btn_save = QPushButton("Сохранить и применить", objectName="PrimaryButton")
+        self.btn_save.setIcon(get_svg_icon("save", color="#020617"))
+        self.btn_save.setMinimumHeight(32)
+        self.btn_save.setMinimumWidth(160)
+        self.btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_save.clicked.connect(self.accept)
 
-        btn_box.addWidget(btn_cancel)
-        btn_box.addWidget(btn_save)
-        layout.addLayout(btn_box)
+        btn_box.addWidget(self.btn_cancel)
+        btn_box.addWidget(self.btn_save)
+        root_layout.addLayout(btn_box)
 
         self._populate_apartments()
         self._refresh_list_view()
+
+    # ─── ПЕРЕТАСКИВАНИЕ ОКНА МЫШЬЮ ────────────────────────────────────────
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            pos = event.position().toPoint() if hasattr(event, 'position') else event.pos()
+            child = self.childAt(pos)
+            is_interactive = False
+            w = child
+            while w and w is not self:
+                if isinstance(w, (QLineEdit, QPushButton, QComboBox, QScrollArea)):
+                    is_interactive = True
+                    break
+                w = w.parentWidget()
+            if not is_interactive:
+                self._drag_pos = event.globalPosition().toPoint() if hasattr(event, 'globalPosition') else event.globalPos()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos and event.buttons() & Qt.MouseButton.LeftButton:
+            curr_pos = event.globalPosition().toPoint() if hasattr(event, 'globalPosition') else event.globalPos()
+            delta = curr_pos - self._drag_pos
+            self.move(self.pos() + delta)
+            self._drag_pos = curr_pos
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.reject()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    # ─── ЛОГИКА ФОРМЫ И СПИСКА ────────────────────────────────────────────
 
     def _populate_apartments(self, query: str = ""):
         """Заполнение списка квартир с маркой [✓ Замена]."""
@@ -231,6 +444,7 @@ class MeterReplacementDialog(QDialog):
             fin_val = float(self.txt_final.text().replace(',', '.'))
             init_val = float(self.txt_initial.text().replace(',', '.'))
         except ValueError:
+            ToastNotification.show_toast(self, "Введите корректные числовые показания!", "ERROR")
             return
 
         w_type = m_data['type']
@@ -244,6 +458,7 @@ class MeterReplacementDialog(QDialog):
 
         self._populate_apartments(self.search_edit.text())
         self._refresh_list_view()
+        ToastNotification.show_toast(self, f"Замена для {apt} ({w_type.upper()} №{m_num}) сохранена", "SUCCESS")
 
     def _refresh_list_view(self):
         """Рендеринг карточек замен в виде матовых капсул с бейджами типа воды."""
@@ -252,13 +467,35 @@ class MeterReplacementDialog(QDialog):
             if item.widget():
                 item.widget().deleteLater()
 
+        count = len(self.closed_records)
+        self.lbl_count_badge.setText(f"({count})")
+        self.lbl_footer_info.setText(f"Всего зафиксировано: {count} шт." if count > 0 else "")
+
+        if count == 0:
+            placeholder = QLabel("Нет добавленных замен.\nВыберите квартиру и прибор выше, чтобы зафиксировать замену.")
+            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            placeholder.setStyleSheet("color: #64748B; font-size: 11px; padding: 24px 0; background: transparent;")
+            self.scroll_layout.insertWidget(0, placeholder)
+            return
+
         for c_rec in self.closed_records:
             n_rec = next((r for r in self.new_records if r.apartment == c_rec.apartment and r.water_type == c_rec.water_type and r.meter_num == c_rec.meter_num), None)
 
             card = QFrame()
             card.setObjectName("GlassCard")
+            card.setStyleSheet("""
+                QFrame#GlassCard {
+                    background: rgba(15, 23, 42, 0.55);
+                    border: 1px solid rgba(255, 255, 255, 0.10);
+                    border-radius: 8px;
+                }
+                QFrame#GlassCard:hover {
+                    background: rgba(15, 23, 42, 0.75);
+                    border: 1px solid rgba(255, 255, 255, 0.22);
+                }
+            """)
             c_lay = QHBoxLayout(card)
-            c_lay.setContentsMargins(12, 8, 12, 8)
+            c_lay.setContentsMargins(10, 6, 10, 6)
             c_lay.setSpacing(10)
 
             # Бейдж капли для ХВС / пламени для ГВС
@@ -280,28 +517,30 @@ class MeterReplacementDialog(QDialog):
             w_str = "ХВС" if is_cold else "ГВС"
 
             lbl_badge = QLabel()
-            lbl_badge.setPixmap(get_svg_icon(badge_icon_name, color=badge_color).pixmap(18, 18))
+            lbl_badge.setPixmap(get_svg_icon(badge_icon_name, color=badge_color).pixmap(16, 16))
             lbl_badge.setStyleSheet("background: transparent;")
 
-            init_str = f" ➔ Нов: <b>{n_rec.initial_reading:.3f}</b>" if n_rec else ""
+            init_str = f" ➔ <span style='color: #10B981;'>Нов: <b>{n_rec.initial_reading:.3f}</b></span>" if n_rec else ""
             txt = (f"<b>{c_rec.apartment}</b> | <span style='color: {badge_color}; font-weight: bold;'>{w_str} №{c_rec.meter_num}</span> "
-                   f"(Закр: <b>{c_rec.final_reading:.3f}</b>{init_str})")
+                   f"(<span style='color: #F87171;'>Закр: <b>{c_rec.final_reading:.3f}</b></span>{init_str})")
 
             lbl = QLabel(txt)
-            lbl.setStyleSheet(f"color: {text_col}; background: transparent; font-size: 13px;")
+            lbl.setStyleSheet(f"color: {text_col}; background: transparent; font-size: 12px;")
 
             # Кнопка Редактировать
             btn_edit = QPushButton(objectName="SecondaryButton")
             btn_edit.setIcon(get_svg_icon("edit"))
-            btn_edit.setToolTip("Редактировать замену")
-            btn_edit.setFixedSize(28, 28)
+            btn_edit.setToolTip("Редактировать замену (подставить в поля)")
+            btn_edit.setFixedSize(26, 26)
+            btn_edit.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_edit.clicked.connect(lambda _, r=c_rec: self._edit_record(r))
 
             # Кнопка Удалить
             btn_del = QPushButton(objectName="DangerButton")
             btn_del.setIcon(get_svg_icon("trash", color="#F87171"))
             btn_del.setToolTip("Удалить запись")
-            btn_del.setFixedSize(28, 28)
+            btn_del.setFixedSize(26, 26)
+            btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_del.clicked.connect(lambda _, r=c_rec: self._remove_record(r))
 
             c_lay.addWidget(lbl_badge)
@@ -355,5 +594,5 @@ class MeterReplacementDialog(QDialog):
             self._refresh_list_view()
             ToastNotification.show_toast(self, "Все замены сброшены", "INFO")
 
-    def get_results(self):
+    def get_results(self) -> Tuple[List[ClosedMeterRecord], List[NewMeterRecord]]:
         return self.closed_records, self.new_records

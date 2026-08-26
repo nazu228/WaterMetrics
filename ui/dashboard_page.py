@@ -1008,6 +1008,8 @@ class MainDashboardPage(QWidget):
                 parent_win.closed_meters = []
                 parent_win.new_meters = []
                 ToastNotification.show_toast(self.window(), "Предыдущие замены ИПУ сброшены для нового шаблона", "INFO")
+                if hasattr(parent_win, 'companion_manager') and parent_win.companion_manager:
+                    parent_win.companion_manager.update_replacements_badge()
 
         out_dir = os.path.dirname(os.path.abspath(tpl_path))
         self.last_template_dir = out_dir
@@ -1180,6 +1182,9 @@ class MainDashboardPage(QWidget):
         if save_to_service:
             HistoryService.add_path(full_path)
         self._update_kpi_metrics()
+
+        if hasattr(self.main_win, 'companion_manager') and self.main_win.companion_manager:
+            self.main_win.companion_manager.win_hist.add_history_entry(full_path, save_to_service=False)
 
     def save_dashboard_state(self):
         self.save_dashboard_layout()

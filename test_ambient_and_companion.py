@@ -16,7 +16,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt, QRect, QPoint, QEvent
+from PySide6.QtCore import Qt, QRect, QPoint, QEvent, QSettings
 
 from ui.gl.ambient_boat import AmbientBoat, BoatState
 from ui.components.companion_dock import (
@@ -108,6 +108,7 @@ class TestCompanionFloatingWindows(unittest.TestCase):
             def pos(self):
                 return QPoint(100, 100)
 
+        QSettings("WaterMetrics", "WaterMetricsApp").setValue("companion/dock_side", "right")
         mgr = CompanionModeManager(DummyMainWin())
         self.assertEqual(mgr.dock_side, DockSide.RIGHT)
         mgr.dock_side = DockSide.LEFT
@@ -175,6 +176,7 @@ class TestCompanionModeManagerFeatures(unittest.TestCase):
     def setUp(self):
         from PySide6.QtCore import QSettings
         QSettings("WaterMetrics", "WaterMetricsApp").remove("companion/card_order")
+        QSettings("WaterMetrics", "WaterMetricsApp").setValue("companion/dock_side", "right")
         self.dummy_main = DummyMainWin()
         self.mgr = CompanionModeManager(self.dummy_main)
         self.mgr.cards = [
@@ -365,6 +367,130 @@ class TestCompanionModeManagerFeatures(unittest.TestCase):
         for card in self.mgr.cards:
             self.assertEqual(card.dock_side, DockSide.RIGHT)
         self.assertIn("Слева", self.mgr.win_top_bar.btn_side.text())
+
+    def test_flight_interaction_locking(self):
+        """Проверка: во время полета взаимодействие заблокировано, разблокируется по прибытии."""
+        self.mgr.set_all_cards_flight_locked(True)
+        self.assertTrue(self.mgr.is_flight_animating)
+        for card in self.mgr.cards:
+            self.assertTrue(card.is_flight_locked)
+
+        # Разблокировка
+        self.mgr.set_all_cards_flight_locked(False)
+        self.assertFalse(self.mgr.is_flight_animating)
+        for card in self.mgr.cards:
+            self.assertFalse(card.is_flight_locked)
+
+    def test_history_full_management_in_companion_dock(self):
+        """Проверка добавления, удаления и очистки истории в режиме набивки."""
+        w_hist = self.mgr.win_hist
+        w_hist.table_hist.setRowCount(0)
+
+        # Добавление отчетов
+        w_hist.add_history_entry("C:/reports/Report_Jan.xlsx", save_to_service=False)
+        w_hist.add_history_entry("C:/reports/Report_Feb.xlsx", save_to_service=False)
+        self.assertEqual(w_hist.table_hist.rowCount(), 2)
+        self.assertEqual(w_hist.table_hist.item(0, 0).text(), "Report_Jan.xlsx")
+        self.assertEqual(w_hist.table_hist.item(1, 0).text(), "Report_Feb.xlsx")
+
+        # Удаление выделенной строки
+        w_hist.table_hist.selectRow(0)
+        w_hist._remove_selected()
+        self.assertEqual(w_hist.table_hist.rowCount(), 1)
+        self.assertEqual(w_hist.table_hist.item(0, 0).text(), "Report_Feb.xlsx")
+
+        # Полная очистка
+        w_hist._clear_all()
+        self.assertEqual(w_hist.table_hist.rowCount(), 0)
+
+    def test_replacement_badge_update(self):
+        """Проверка динамического обновления бейджа замен ИПУ."""
+        self.dummy_main.closed_meters = [{"meter": "123"}]
+        self.mgr.update_replacements_badge()
+        self.assertIn("1 замен", self.mgr.win_files.btn_repl.text())
+
+        self.dummy_main.closed_meters = []
+        self.mgr.update_replacements_badge()
+        self.assertEqual(self.mgr.win_files.btn_repl.text(), "Мастер замен счетчиков")
+
+    def test_directory_persistence_and_file_linking(self):
+        """Проверка сохранения директорий и динамической подсветки связи файлов."""
+        w_files = self.mgr.win_files
+        w_files.set_template_path("C:/data/Template_2026_01.xlsx")
+        self.assertEqual(w_files.tpl_path, "C:/data/Template_2026_01.xlsx")
+        self.assertEqual(w_files.drop_tpl.property("state"), "linked")
+
+        w_files.set_arcus_path("C:/data/Arcus_2026_01.xlsx")
+        self.assertEqual(w_files.arc_path, "C:/data/Arcus_2026_01.xlsx")
+        self.assertEqual(w_files.drop_arc.property("state"), "linked")
+
+    def test_watchdog_timer_and_self_healing(self):
+        """Проверка работы 2-секундного сторожевого таймера и авторазблокировки."""
+        self.mgr.enter_companion_mode()
+        self.assertTrue(self.mgr.watchdog_timer.isActive())
+
+        # Искусственно создаем зависший флаг анимации
+        self.mgr.is_flight_animating = True
+        self.mgr._animating_dock = True
+        self.mgr._active_anim_group = None
+
+        # Запускаем сторожевой чек
+        self.mgr._watchdog_check()
+
+        # Флаги успешно сброшены и карты разблокированы
+        self.assertFalse(self.mgr.is_flight_animating)
+        self.assertFalse(self.mgr._animating_dock)
+        self.assertTrue(self.mgr.proximity_timer.isActive())
+
+        self.mgr.exit_companion_mode()
+        self.assertFalse(self.mgr.watchdog_timer.isActive())
+
+    def test_meter_replacement_dialog_frameless_and_operations(self):
+        """Проверка безрамочного Мастера замен счетчиков и всех его операций."""
+        from ui.dialogs.replacement_dialog import MeterReplacementDialog
+        from models import ClosedMeterRecord, NewMeterRecord
+
+        apts_data = {
+            "квартира 1": [
+                {"type": "cold", "num": 1, "prev": 120.5},
+                {"type": "hot", "num": 1, "prev": 85.0}
+            ],
+            "квартира 2": [
+                {"type": "cold", "num": 1, "prev": 210.0}
+            ]
+        }
+
+        dlg = MeterReplacementDialog(None, apts_data=apts_data)
+        # Проверяем безрамочность и прозрачность
+        self.assertTrue(bool(dlg.windowFlags() & Qt.WindowType.FramelessWindowHint))
+        self.assertTrue(dlg.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground))
+
+        # Выбираем квартиру 1 и добавляем замену для ХВС
+        dlg.combo_apt.setCurrentIndex(0)
+        self.assertEqual(dlg.txt_final.text(), "120.5")
+        dlg.txt_initial.setText("0.0")
+        dlg._add_replacement()
+
+        closed, new = dlg.get_results()
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(len(new), 1)
+        self.assertEqual(closed[0].apartment, "квартира 1")
+        self.assertEqual(closed[0].water_type, "cold")
+        self.assertEqual(closed[0].final_reading, 120.5)
+        self.assertEqual(new[0].initial_reading, 0.0)
+
+        # Редактирование
+        dlg.txt_initial.setText("5.0")
+        dlg._add_replacement()
+        closed, new = dlg.get_results()
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(new[0].initial_reading, 5.0)
+
+        # Удаление
+        dlg._remove_record(closed[0])
+        closed, new = dlg.get_results()
+        self.assertEqual(len(closed), 0)
+        self.assertEqual(len(new), 0)
 
 
 class TestStrikethroughAndValidation(unittest.TestCase):
