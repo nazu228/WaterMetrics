@@ -28,7 +28,7 @@ except Exception:
     pass
 
 # Версия приложения
-APP_VERSION: str = "1.1.0"
+APP_VERSION: str = "1.2.0"
 
 # Обновления через GitHub
 DEFAULT_GITHUB_REPO: str = "nazu228/WaterMetrics"
