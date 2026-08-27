@@ -12,8 +12,11 @@ ENV/
 # PyInstaller / Build outputs
 build/
 dist/
+dist_installer/
 *.manifest
 test_results/
+пос 28 тест.xlsx
+хуй.xlsx
 
 # User Data & Backups
 .watermetrics/

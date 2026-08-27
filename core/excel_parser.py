@@ -422,11 +422,6 @@ class ExcelManager:
                 ap['prev'][m_key] = prev_val
                 ap['consum'][m_key] = 0.0
 
-                # Проверка зачеркивания в шаблоне
-                if (curr_cell_obj.font and curr_cell_obj.font.strike) or (prev_cell_obj.font and prev_cell_obj.font.strike):
-                    ap['striked'][m['type']] = True
-                    ap['striked_meters'][m_key] = True
-
             all_rows[norm_name] = ap
 
         # Загрузка данных расхода из файла Аркус
@@ -533,25 +528,26 @@ class ExcelManager:
                 if pval is None:
                     cell_curr.value = None
                     cell_cons.value = None
+                    nf_plain = Font(name="Tahoma", size=8.5, strike=False)
+                    cell_prev.font = nf_plain
+                    cell_curr.font = nf_plain
+                    cell_cons.font = nf_plain
                     continue
 
                 curr_val = round(pval + cons, 3)
                 cell_curr.value = curr_val
                 cell_cons.value = cons
 
-                # Применение зачеркивания (из Аркуса или Шаблона)
+                # Применение зачеркивания (строго из Аркуса)
                 is_meter_striked = (
                     ap.get('striked_meters', {}).get(key, False) or
-                    ap.get('striked', {}).get(m['type'], False) or
-                    bool(cell_prev.font and cell_prev.font.strike) or
-                    bool(cell_curr.font and cell_curr.font.strike)
+                    ap.get('striked', {}).get(m['type'], False)
                 )
 
-                if is_meter_striked:
-                    nf = Font(name="Tahoma", size=8.5, strike=True)
-                    cell_prev.font = nf
-                    cell_curr.font = nf
-                    cell_cons.font = nf
+                nf = Font(name="Tahoma", size=8.5, strike=bool(is_meter_striked))
+                cell_prev.font = nf
+                cell_curr.font = nf
+                cell_cons.font = nf
 
         # 2. Физическое удаление старых служебных строк внутри диапазона квартир
         max_ap_row = max((ap['row'] for ap in all_rows.values()), default=5)

@@ -603,6 +603,59 @@ class TestStrikethroughAndValidation(unittest.TestCase):
 
             self.assertTrue(found_334, "Квартира 334 должна присутствовать в итоговом файле")
 
+    def test_template_strikethrough_ignored_and_overridden(self):
+        """Проверка: зачеркивание в шаблоне полностью игнорируется, если в Аркусе счетчик не зачеркнут."""
+        import openpyxl
+        from openpyxl.styles import Font
+        from core.excel_parser import ExcelManager
+
+        # Создаем временный шаблон с зачеркнутыми ячейками
+        wb_tpl = openpyxl.Workbook()
+        ws_tpl = wb_tpl.active
+        ws_tpl.title = "Ведомость"
+        ws_tpl.append(["", "Холодная вода", "", "", "Горячая вода", "", ""])
+        ws_tpl.append(["Абонент", "Предыдущее", "Текущее", "Расход", "Предыдущее", "Текущее", "Расход"])
+        ws_tpl.append(["квартира 100", 10.0, 15.0, 5.0, 20.0, 25.0, 5.0])
+        
+        # Навешиваем зачеркивание в шаблоне на квартиру 100 ХВ (строка 3)
+        ws_tpl.cell(row=3, column=2).font = Font(name="Tahoma", strike=True)
+        ws_tpl.cell(row=3, column=3).font = Font(name="Tahoma", strike=True)
+
+        tpl_path = os.path.join(BASE_DIR, "test_results", "test_tpl_strike_ignore.xlsx")
+        os.makedirs(os.path.dirname(tpl_path), exist_ok=True)
+        wb_tpl.save(tpl_path)
+
+        # Создаем Аркус без зачеркиваний
+        wb_arc = openpyxl.Workbook()
+        ws_arc = wb_arc.active
+        ws_arc.append(["", "", "Холодная вода", "", "", "Горячая вода", "", ""])
+        ws_arc.append(["Лицевой", "Абонент", "Предыдущее", "Текущее", "Расход", "Предыдущее", "Текущее", "Расход"])
+        ws_arc.append(["12345", "квартира 100", 10.0, 15.0, 5.0, 20.0, 25.0, 5.0])
+        
+        arc_path = os.path.join(BASE_DIR, "test_results", "test_arc_no_strike.xlsx")
+        wb_arc.save(arc_path)
+
+        mgr = ExcelManager()
+        wb, ws, meters, meter_by_type, all_rows, non_apartment_rows, name_col = mgr.extract_data(tpl_path, arc_path)
+
+        # Проверяем, что в all_rows зачеркивание не установилось
+        self.assertFalse(all_rows.get('квартира 100', {}).get('striked', {}).get('cold', False))
+        self.assertFalse(all_rows.get('квартира 100', {}).get('striked', {}).get('hot', False))
+
+        res_path = os.path.join(BASE_DIR, "test_results", "test_res_strike_cleared.xlsx")
+        mgr.save_result(wb, ws, res_path, meters, all_rows, non_apartment_rows, name_col)
+
+        wb_res = openpyxl.load_workbook(res_path)
+        ws_res = wb_res.active
+        
+        # Проверяем, что в результирующем файле зачеркивание снято
+        for r in range(1, ws_res.max_row + 1):
+            if '100' in str(ws_res.cell(r, 1).value or ''):
+                for col_idx in range(2, ws_res.max_column + 1):
+                    cell = ws_res.cell(r, col_idx)
+                    self.assertFalse(bool(cell.font and cell.font.strike), f"Cell {cell.coordinate} must NOT be striked")
+
+
 
 if __name__ == "__main__":
     unittest.main()
