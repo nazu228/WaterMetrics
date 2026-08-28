@@ -25,8 +25,8 @@ from services.updater_service import (
 class TestUpdaterService(unittest.TestCase):
     """Тестирование парсинга версий и логики обновлений."""
 
-    def test_app_version_is_1_3_0(self):
-        self.assertEqual(APP_VERSION, "1.3.0")
+    def test_app_version_is_1_3_1(self):
+        self.assertEqual(APP_VERSION, "1.3.1")
 
     def test_version_parsing(self):
         self.assertEqual(parse_version("1.0.0"), (1, 0, 0))
@@ -50,6 +50,32 @@ class TestUpdaterService(unittest.TestCase):
         self.assertFalse(is_newer_version("1.0.0", "1.0.0"))
         self.assertFalse(is_newer_version("v1.0.0", "1.0.0"))
         self.assertFalse(is_newer_version("1.1.0", "1.0.0"))
+
+    def test_sha256_verification(self):
+        import tempfile
+        from services.updater_service import calculate_file_sha256, verify_file_sha256
+
+        with tempfile.NamedTemporaryFile(delete=False) as tf:
+            tf.write(b"WaterMetrics test secure update content")
+            temp_path = tf.name
+
+        try:
+            expected_hash = calculate_file_sha256(temp_path)
+            self.assertTrue(len(expected_hash) == 64)
+            self.assertTrue(verify_file_sha256(temp_path, expected_hash))
+            self.assertFalse(verify_file_sha256(temp_path, "incorrect_hash_value"))
+            self.assertTrue(verify_file_sha256(temp_path, ""))  # Empty expected hash = ignore
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    def test_hwid_generation(self):
+        from services.updater_service import get_system_hwid
+        hwid1 = get_system_hwid()
+        hwid2 = get_system_hwid()
+        self.assertTrue(bool(hwid1))
+        self.assertEqual(hwid1, hwid2)
+        self.assertEqual(len(hwid1), 32)
 
 
 class TestI18nAndWelcomeSetup(unittest.TestCase):

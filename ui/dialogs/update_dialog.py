@@ -182,9 +182,11 @@ class UpdateDialog(QDialog):
         btn_box = QHBoxLayout()
         btn_box.setSpacing(10)
 
-        self.btn_gh = QPushButton("Открыть на GitHub", objectName="SecondaryButton")
-        self.btn_gh.setIcon(get_svg_icon("github"))
+        has_link = bool(self.release_info.html_url)
+        self.btn_gh = QPushButton("Подробнее о релизе", objectName="SecondaryButton")
+        self.btn_gh.setIcon(get_svg_icon("info" if "github" not in self.release_info.html_url.lower() else "github"))
         self.btn_gh.setMinimumHeight(36)
+        self.btn_gh.setVisible(has_link)
         self.btn_gh.clicked.connect(self._open_github_page)
 
         self.btn_install = QPushButton("⚡ Скачать и установить", objectName="PrimaryButton")
@@ -196,7 +198,8 @@ class UpdateDialog(QDialog):
         self.btn_later.setMinimumHeight(36)
         self.btn_later.clicked.connect(self.reject)
 
-        btn_box.addWidget(self.btn_gh)
+        if has_link:
+            btn_box.addWidget(self.btn_gh)
         btn_box.addStretch()
         btn_box.addWidget(self.btn_later)
         btn_box.addWidget(self.btn_install)
@@ -240,7 +243,7 @@ class UpdateDialog(QDialog):
         download_url = self.release_info.asset_download_url
         if not download_url:
             # Если прямой бинарный ассет отсутствует, открываем страницу релиза
-            ToastNotification.show_toast(self, "Прямой файл установки не найден. Открываем GitHub...", "INFO")
+            ToastNotification.show_toast(self, "Прямой файл установки не найден. Открываем информацию...", "INFO")
             self._open_github_page()
             self.accept()
             return
@@ -251,7 +254,13 @@ class UpdateDialog(QDialog):
         self.lbl_progress_status.setText("Подключение к серверу загрузки...")
 
         filename = self.release_info.asset_name or f"WaterMetrics_v{self.release_info.version}.exe"
-        self.downloader = GitHubAssetDownloader(download_url, filename, self)
+        sha256 = getattr(self.release_info, 'sha256', '')
+        self.downloader = GitHubAssetDownloader(
+            download_url=download_url,
+            filename=filename,
+            expected_sha256=sha256,
+            parent=self
+        )
         self.downloader.progress.connect(self._on_download_progress)
         self.downloader.finished.connect(self._on_download_finished)
         self.downloader.failed.connect(self._on_download_failed)

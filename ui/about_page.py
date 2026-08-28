@@ -1484,7 +1484,7 @@ class AboutPage(QWidget):
         status_info_col = "#028090" if is_light else "#00F2FE"
 
         if hasattr(self, 'lbl_update_status'):
-            self.lbl_update_status.setText(f"Проверка обновлений в репозитории {repo}...")
+            self.lbl_update_status.setText("Проверка наличия обновлений...")
             self.lbl_update_status.setStyleSheet(f"font-size: 12px; color: {status_info_col}; font-weight: 600;")
 
         self.update_checker = GitHubUpdateChecker(repo=repo, current_ver=APP_VERSION, parent=self)

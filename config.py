@@ -28,9 +28,13 @@ except Exception:
     pass
 
 # Версия приложения
-APP_VERSION: str = "1.3.0"
+APP_VERSION: str = "1.3.1"
 
-# Обновления через GitHub
+# Обновления (Яндекс Облако Serverless / S3)
+UPDATE_MANIFEST_URL: str = "https://storage.yandexcloud.net/watermetrics-releases/version.json"
+LICENSE_API_URL: str = ""  # URL Yandex Cloud Function для проверки лицензий (при включении)
+
+# Резервный источник (GitHub)
 DEFAULT_GITHUB_REPO: str = "nazu228/WaterMetrics"
 GITHUB_API_BASE: str = "https://api.github.com/repos"
 
