@@ -45,15 +45,24 @@ jobs:
           from config import APP_VERSION
           os.makedirs('dist', exist_ok=True)
           patch_zip = f'dist/WaterMetrics_v{APP_VERSION}_patch.zip'
-          ignored = {'__pycache__', '.git', 'build', 'dist', '.vscode', '.idea', '.gemini', 'env', 'venv', '.venv'}
-          with zipfile.ZipFile(patch_zip, 'w', zipfile.ZIP_DEFLATED) as z:
+          allowed_dirs = {'core', 'services', 'ui', 'assets'}
+          allowed_root = {'main.py', 'config.py', 'models.py', 'CHANGELOG.md', 'requirements.txt'}
+          exclude_ext = {'.pyc', '.pyo', '.pyd', '.spec', '.log', '.tmp', '.exe', '.xlsx', '.zip', '.bak'}
+          with zipfile.ZipFile(patch_zip, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
               for root, dirs, files in os.walk('.'):
-                  dirs[:] = [d for d in dirs if d not in ignored and not d.startswith('.')]
+                  dirs[:] = [d for d in dirs if d not in ('.git', '__pycache__', 'build', 'dist', 'dist_installer', 'dist_release', '.venv', 'venv') and not d.startswith('.')]
+                  rel_root = os.path.relpath(root, '.')
+                  top_dir = rel_root.split(os.sep)[0] if rel_root != '.' else '.'
+                  if top_dir != '.' and top_dir not in allowed_dirs:
+                      continue
                   for f in files:
-                      if not f.endswith(('.pyc', '.pyo', '.tmp', '.bak')) and f not in {'Thumbs.db', 'Desktop.ini'}:
-                          p = os.path.join(root, f)
-                          z.write(p, os.path.relpath(p, '.'))
-          print('Created patch:', patch_zip)
+                      if os.path.splitext(f)[1].lower() in exclude_ext or f.startswith('.'):
+                          continue
+                      if top_dir == '.' and f not in allowed_root:
+                          continue
+                      p = os.path.join(root, f)
+                      z.write(p, os.path.relpath(p, '.'))
+          print('Created patch:', patch_zip, 'Size:', os.path.getsize(patch_zip))
           "
 
       - name: Publish GitHub Release and Assets
@@ -64,7 +73,8 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           Write-Host "Publishing release for tag: $tag"
-          $files = Get-ChildItem -Path "dist" -Include "WaterMetrics.exe", "WaterMetrics_Setup_*.exe", "WaterMetrics_v*_patch.zip" -Recurse | Select-Object -ExpandProperty FullName
+          $files = Get-ChildItem -Path "dist", "dist_installer" -Include "WaterMetrics.exe", "WaterMetrics_Setup_*.exe", "WaterMetrics_v*_patch.zip" -Recurse | Select-Object -ExpandProperty FullName
+          Write-Host "Found asset files: $files"
           
           # Проверяем существует ли уже релиз
           gh release view $tag
