@@ -315,16 +315,25 @@ class RemoteUpdateChecker(QThread):
 
     def __init__(
         self,
-        manifest_url: Optional[str] = None,
+        manifest_url_or_repo: Optional[str] = None,
         repo: str = DEFAULT_GITHUB_REPO,
         current_ver: str = APP_VERSION,
         license_key: Optional[str] = None,
         parent: Optional[QObject] = None
     ):
         super().__init__(parent)
-        self.manifest_url = manifest_url or UPDATE_MANIFEST_URL
-        self.repo = repo.strip()
-        self.current_ver = current_ver
+        # Умный разбор аргументов для 100% обратной совместимости
+        if manifest_url_or_repo and (manifest_url_or_repo.startswith("http://") or manifest_url_or_repo.startswith("https://")):
+            self.manifest_url = manifest_url_or_repo
+            self.repo = (repo or DEFAULT_GITHUB_REPO).strip()
+        elif manifest_url_or_repo and "/" in manifest_url_or_repo and not manifest_url_or_repo.startswith("http"):
+            self.manifest_url = UPDATE_MANIFEST_URL
+            self.repo = manifest_url_or_repo.strip()
+        else:
+            self.manifest_url = UPDATE_MANIFEST_URL
+            self.repo = (repo or DEFAULT_GITHUB_REPO).strip()
+
+        self.current_ver = current_ver or APP_VERSION
         self.license_key = license_key
         self._is_cancelled = False
 
@@ -332,6 +341,10 @@ class RemoteUpdateChecker(QThread):
         self._is_cancelled = True
 
     def run(self):
+        # Очищаем sys.path от любых несуществующих путей перед сетевыми вызовами
+        sys.path = [p for p in sys.path if p and os.path.exists(p)]
+
+        s3_error_msg = ""
         try:
             # ── 1. Пробуем проверить через Яндекс Облако (S3 / Serverless manifest) ──
             if self.manifest_url:
@@ -346,18 +359,25 @@ class RemoteUpdateChecker(QThread):
                             self.already_latest.emit(self.current_ver)
                         return
                 except Exception as s3_err:
-                    # Если манифест S3 недоступен (например, еще не залит), пробуем fallback
+                    s3_error_msg = str(s3_err)
                     print(f"[Updater] S3-манифест не ответил ({s3_err}), пробуем GitHub...")
 
             # ── 2. Fallback: GitHub Releases ──
             if self.repo and "/" in self.repo:
-                info = self._check_github_releases()
-                if self._is_cancelled:
+                try:
+                    info = self._check_github_releases()
+                    if self._is_cancelled:
+                        return
+                    if info and is_newer_version(self.current_ver, info.version):
+                        self.update_available.emit(info)
+                    elif info:
+                        self.already_latest.emit(self.current_ver)
                     return
-                if info and is_newer_version(self.current_ver, info.version):
-                    self.update_available.emit(info)
-                elif info:
-                    self.already_latest.emit(self.current_ver)
+                except Exception as gh_err:
+                    print(f"[Updater] GitHub fallback также не ответил: {gh_err}")
+
+            if s3_error_msg:
+                self.check_failed.emit(f"Не удалось подключиться к серверу обновлений: {s3_error_msg}")
             else:
                 self.check_failed.emit("Не настроен источник обновлений (манифест или репозиторий).")
 

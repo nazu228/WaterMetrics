@@ -55,37 +55,44 @@ def calculate_sha256(filepath: str) -> str:
 
 def create_patch_zip(version: str, output_zip_path: str) -> int:
     """
-    Создает легкий zip-архив с кодом и ресурсами приложения.
-    Исключает временные файлы, гиты, кэш и бэкапы.
+    Создает легкий компактный zip-патч (1-2 МБ) только с кодом и ресурсами приложения.
+    Исключает бинарники, инсталляторы, тяжелые xlsx файлы, кэш и бэкапы.
     """
-    exclude_dirs = {
-        '.git', '.github', '.pytest_cache', '__pycache__', 'dist', 'build',
-        'dist_release', '.idea', '.vscode', 'scratch', 'versions', 'backups', '.venv', 'venv'
-    }
-    exclude_extensions = {'.pyc', '.pyo', '.pyd', '.spec', '.log', '.tmp'}
+    # Разрешенные директории и файлы верхнего уровня
+    allowed_dirs = {'core', 'services', 'ui', 'assets'}
+    allowed_root_files = {'main.py', 'config.py', 'models.py', 'CHANGELOG.md', 'requirements.txt'}
+    exclude_extensions = {'.pyc', '.pyo', '.pyd', '.spec', '.log', '.tmp', '.exe', '.xlsx', '.zip', '.bak'}
 
-    print(f"[*] Упаковка исходных файлов релиза v{version}...")
+    print(f"[*] Упаковка компактного zip-патча v{version} (1-2 МБ)...")
     file_count = 0
 
     with zipfile.ZipFile(output_zip_path, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
         for root, dirs, files in os.walk(BASE_DIR):
-            dirs[:] = [d for d in dirs if d not in exclude_dirs and not d.startswith('.')]
+            # Пропускаем кэш и служебные папки
+            dirs[:] = [d for d in dirs if d not in ('.git', '__pycache__', '.pytest_cache', 'build', 'dist', 'dist_installer', 'dist_release', 'versions', 'backups', '.venv', 'venv') and not d.startswith('.')]
+
+            rel_root = os.path.relpath(root, BASE_DIR)
+            top_dir = rel_root.split(os.sep)[0] if rel_root != '.' else '.'
+
+            # Проверяем, разрешена ли текущая директория
+            if top_dir != '.' and top_dir not in allowed_dirs:
+                continue
 
             for file in files:
                 ext = os.path.splitext(file)[1].lower()
                 if ext in exclude_extensions or file.startswith('.'):
                     continue
 
+                if top_dir == '.' and file not in allowed_root_files:
+                    continue
+
                 abs_path = os.path.join(root, file)
                 rel_path = os.path.relpath(abs_path, BASE_DIR)
-
-                if rel_path.startswith("dist_release") or rel_path.startswith("installer" + os.sep + "Output"):
-                    continue
 
                 zf.write(abs_path, rel_path)
                 file_count += 1
 
-    print(f"[OK] Добавлено файлов: {file_count}")
+    print(f"[OK] Упаковано файлов: {file_count}")
     return file_count
 
 
