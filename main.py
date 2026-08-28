@@ -67,7 +67,17 @@ def main():
     # Фиксируем успешный запуск в Crash Guard
     VersionManager.crash_guard_mark_success()
 
-    sys.exit(app.exec())
+    ret = app.exec()
+    try:
+        window.close()
+        del window
+        del app
+        import gc
+        gc.collect()
+    except Exception:
+        pass
+
+    sys.exit(ret)
 
 if __name__ == "__main__":
     main()
