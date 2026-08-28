@@ -272,6 +272,10 @@ class ReleaseInfo:
     is_patch: bool = False
     sha256: str = ""
 
+    @property
+    def download_url(self) -> Optional[str]:
+        return self.asset_download_url
+
 
 # Алиас для обратной совместимости
 GitHubReleaseInfo = ReleaseInfo
