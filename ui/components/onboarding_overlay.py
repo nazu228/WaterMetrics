@@ -65,7 +65,7 @@ class OnboardingOverlay(QWidget):
 
     def _init_card(self):
         self.card = HoverGlassCard(self)
-        self.card.setFixedWidth(380)
+        self.card.setFixedWidth(400)
         self.card_layout = QVBoxLayout(self.card)
         self.card_layout.setContentsMargins(20, 16, 20, 16)
         self.card_layout.setSpacing(10)
@@ -75,34 +75,11 @@ class OnboardingOverlay(QWidget):
         top_row.setSpacing(8)
 
         self.lbl_step_badge = QLabel("Шаг 1 из 5")
-        accent = ThemeManager.get_current_accent_color()
-        self.lbl_step_badge.setStyleSheet(f"""
-            background: rgba(0, 216, 144, 0.15);
-            color: {accent};
-            font-size: 11px;
-            font-weight: bold;
-            padding: 3px 8px;
-            border-radius: 6px;
-        """)
 
         self.btn_skip = QPushButton("✕")
-        self.btn_skip.setFixedSize(24, 24)
-        self.btn_skip.setCursor(Qt.PointingHandCursor)
+        self.btn_skip.setFixedSize(26, 26)
+        self.btn_skip.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_skip.setToolTip("Пропустить обучение (Esc)")
-        self.btn_skip.setStyleSheet("""
-            QPushButton {
-                background: rgba(255, 255, 255, 0.08);
-                color: #94A3B8;
-                border: none;
-                border-radius: 6px;
-                font-size: 12px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: rgba(239, 68, 68, 0.4);
-                color: #FFFFFF;
-            }
-        """)
         self.btn_skip.clicked.connect(self.skip_tour)
 
         top_row.addWidget(self.lbl_step_badge)
@@ -112,20 +89,17 @@ class OnboardingOverlay(QWidget):
 
         # ─── Заголовок и Описание ───
         self.lbl_title = QLabel("Заголовок шага")
-        self.lbl_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #FFFFFF;")
         self.lbl_title.setWordWrap(True)
         self.card_layout.addWidget(self.lbl_title)
 
         self.lbl_desc = QLabel("Описание шага...")
-        self.lbl_desc.setStyleSheet("font-size: 12px; line-height: 1.4; color: #CBD5E1;")
         self.lbl_desc.setWordWrap(True)
         self.card_layout.addWidget(self.lbl_desc)
 
         # ─── Кнопка демо-данных (на шаге 1) ───
         self.btn_demo = QPushButton("✨ Загрузить демо-данные для теста", objectName="AccentButton")
-        self.btn_demo.setIcon(get_svg_icon("sparkles", color="#020617"))
-        self.btn_demo.setMinimumHeight(32)
-        self.btn_demo.setCursor(Qt.PointingHandCursor)
+        self.btn_demo.setMinimumHeight(34)
+        self.btn_demo.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_demo.clicked.connect(self._on_demo_clicked)
         self.card_layout.addWidget(self.btn_demo)
 
@@ -145,15 +119,221 @@ class OnboardingOverlay(QWidget):
         btn_box.addStretch()
         btn_box.addWidget(self.btn_next)
         self.card_layout.addLayout(btn_box)
+        self._update_theme_styles()
+
+    def _update_theme_styles(self):
+        """Применение стилей выбранной темы оформления ко всем элементам оверлея."""
+        t_name = ThemeManager.get_current_theme_name()
+        accent = ThemeManager.get_current_accent_color(t_name)
+        is_light = t_name in ("Pearl Light", "Как дома")
+
+        if t_name == "Как дома":
+            self.lbl_step_badge.setStyleSheet("""
+                background: #0A246A;
+                color: #FFFFFF;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 3px 8px;
+                border-radius: 3px;
+            """)
+            self.lbl_title.setStyleSheet("font-size: 14.5px; font-weight: bold; color: #0A246A; background: transparent;")
+            self.lbl_desc.setStyleSheet("font-size: 12px; line-height: 1.4; color: #000000; background: transparent;")
+            self.btn_skip.setStyleSheet("""
+                QPushButton {
+                    background: #ECE9D8;
+                    color: #000000;
+                    border: 1px solid #7F9DB9;
+                    border-radius: 3px;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background: #EF4444;
+                    color: #FFFFFF;
+                }
+            """)
+            self.btn_demo.setStyleSheet("""
+                QPushButton {
+                    background: #0A246A;
+                    color: #FFFFFF;
+                    border: 1px solid #000000;
+                    border-radius: 3px;
+                    font-weight: bold;
+                    font-size: 12px;
+                    padding: 6px 12px;
+                }
+                QPushButton:hover {
+                    background: #005A9E;
+                }
+            """)
+            self.btn_prev.setStyleSheet("""
+                QPushButton {
+                    background: #ECE9D8;
+                    color: #000000;
+                    border: 1px solid #7F9DB9;
+                    border-radius: 3px;
+                    font-weight: 600;
+                    padding: 5px 12px;
+                }
+                QPushButton:hover {
+                    background: #DFDBC8;
+                }
+            """)
+            self.btn_next.setStyleSheet("""
+                QPushButton {
+                    background: #0A246A;
+                    color: #FFFFFF;
+                    border: 1px solid #000000;
+                    border-radius: 3px;
+                    font-weight: bold;
+                    padding: 5px 16px;
+                }
+                QPushButton:hover {
+                    background: #005A9E;
+                }
+            """)
+        elif is_light:
+            self.lbl_step_badge.setStyleSheet(f"""
+                background: rgba(2, 128, 144, 0.15);
+                color: #028090;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 3px 8px;
+                border-radius: 6px;
+            """)
+            self.lbl_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #0F172A; background: transparent;")
+            self.lbl_desc.setStyleSheet("font-size: 12px; line-height: 1.4; color: #334155; background: transparent;")
+            self.btn_skip.setStyleSheet("""
+                QPushButton {
+                    background: #E2E8F0;
+                    color: #64748B;
+                    border: none;
+                    border-radius: 6px;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background: rgba(239, 68, 68, 0.3);
+                    color: #EF4444;
+                }
+            """)
+            self.btn_demo.setStyleSheet(f"""
+                QPushButton {{
+                    background: #028090;
+                    color: #FFFFFF;
+                    border: 1px solid #028090;
+                    border-radius: 6px;
+                    font-weight: bold;
+                    font-size: 12px;
+                    padding: 6px 12px;
+                }}
+                QPushButton:hover {{
+                    background: #00A896;
+                }}
+            """)
+            self.btn_prev.setStyleSheet("""
+                QPushButton {
+                    background: #E2E8F0;
+                    color: #0F172A;
+                    border: 1px solid #CBD5E1;
+                    border-radius: 6px;
+                    font-weight: 600;
+                    padding: 5px 12px;
+                }
+                QPushButton:hover {
+                    background: #CBD5E1;
+                }
+            """)
+            self.btn_next.setStyleSheet(f"""
+                QPushButton {{
+                    background: #028090;
+                    color: #FFFFFF;
+                    border: 1px solid #028090;
+                    border-radius: 6px;
+                    font-weight: bold;
+                    padding: 5px 16px;
+                }}
+                QPushButton:hover {{
+                    background: #00A896;
+                }}
+            """)
+        else:
+            self.lbl_step_badge.setStyleSheet(f"""
+                background: rgba(0, 216, 144, 0.15);
+                color: {accent};
+                font-size: 11px;
+                font-weight: bold;
+                padding: 3px 8px;
+                border-radius: 6px;
+            """)
+            self.lbl_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #FFFFFF; background: transparent;")
+            self.lbl_desc.setStyleSheet("font-size: 12px; line-height: 1.4; color: #CBD5E1; background: transparent;")
+            self.btn_skip.setStyleSheet("""
+                QPushButton {
+                    background: rgba(255, 255, 255, 0.08);
+                    color: #94A3B8;
+                    border: none;
+                    border-radius: 6px;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background: rgba(239, 68, 68, 0.4);
+                    color: #FFFFFF;
+                }
+            """)
+            self.btn_demo.setStyleSheet(f"""
+                QPushButton {{
+                    background: {accent};
+                    color: #020617;
+                    border: 1px solid {accent};
+                    border-radius: 6px;
+                    font-weight: bold;
+                    font-size: 12px;
+                    padding: 6px 12px;
+                }}
+                QPushButton:hover {{
+                    background: #FFFFFF;
+                }}
+            """)
+            self.btn_prev.setStyleSheet("""
+                QPushButton {
+                    background: rgba(255, 255, 255, 0.10);
+                    color: #FFFFFF;
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    border-radius: 6px;
+                    font-weight: 600;
+                    padding: 5px 12px;
+                }
+                QPushButton:hover {
+                    background: rgba(255, 255, 255, 0.18);
+                }
+            """)
+            self.btn_next.setStyleSheet(f"""
+                QPushButton {{
+                    background: {accent};
+                    color: #020617;
+                    border: 1px solid {accent};
+                    border-radius: 6px;
+                    font-weight: bold;
+                    padding: 5px 16px;
+                }}
+                QPushButton:hover {{
+                    background: #FFFFFF;
+                }}
+            """)
+
+        self.btn_demo.setIcon(get_svg_icon("sparkles", color="#FFFFFF" if is_light else "#020617"))
 
     def start(self):
         """Запуск показа онбординга."""
         self.current_step_idx = 0
         self.update_geometry_to_parent()
+        self._update_theme_styles()
         self.show()
         self.raise_()
         self.setFocus()
-        self._show_current_step()
+        QTimer.singleShot(50, self._show_current_step)
 
     def _show_current_step(self):
         if not self.steps or self.current_step_idx >= len(self.steps):
@@ -161,6 +341,10 @@ class OnboardingOverlay(QWidget):
             return
 
         step = self.steps[self.current_step_idx]
+
+        # Если шаг требует определенной страницы в главном окне
+        if hasattr(self.parent(), 'switch_page') and hasattr(step, 'page_index'):
+            self.parent().switch_page(step.page_index)
 
         # Обновление текстов
         total = len(self.steps)
@@ -178,6 +362,7 @@ class OnboardingOverlay(QWidget):
         else:
             self.btn_next.setText("Далее ›")
 
+        self._update_theme_styles()
         # Перемещение карточки и перерисовка
         self._position_card()
         self.update()
@@ -190,9 +375,13 @@ class OnboardingOverlay(QWidget):
         if not target or not target.isVisible():
             return None
 
-        # Маппинг координат в систему координат оверлея
-        top_left = target.mapTo(self, QPoint(0, 0))
-        return QRect(top_left, target.size())
+        # Маппинг абсолютных глобальных координат в локальные координаты оверлея
+        try:
+            g_pos = target.mapToGlobal(QPoint(0, 0))
+            local_pos = self.mapFromGlobal(g_pos)
+            return QRect(local_pos, target.size())
+        except Exception:
+            return None
 
     def _position_card(self):
         target_rect = self._get_target_rect()

@@ -12,7 +12,7 @@ from typing import List, Dict
 
 from PySide6.QtWidgets import (
     QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QFileDialog
+    QPushButton, QFileDialog, QSizePolicy
 )
 from PySide6.QtCore import Qt, QTimer, QRectF, QEvent, Signal, QPoint, QEasingCurve, QPropertyAnimation, QSize
 from PySide6.QtGui import QFont, QColor, QPainter, QPainterPath, QPen, QBrush, QDragEnterEvent, QDropEvent, QLinearGradient
@@ -62,14 +62,15 @@ class ExcelDropZone(QFrame):
     def init_ui(self):
         self.setObjectName("GlassCard")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setMinimumSize(180, 96)
+        self.setMinimumSize(120, 52)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self.box_layout = QVBoxLayout(self)
-        self.box_layout.setContentsMargins(10, 8, 10, 8)
-        self.box_layout.setSpacing(3)
+        self.box_layout.setContentsMargins(8, 4, 8, 4)
+        self.box_layout.setSpacing(2)
         self.box_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.icon_badge = GlassIconWidget("folder", size=QSize(28, 28))
+        self.icon_badge = GlassIconWidget("folder", size=QSize(24, 24))
         self.icon_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.lbl_title = QLabel(self.title, objectName="DropZoneTitle")
@@ -88,58 +89,154 @@ class ExcelDropZone(QFrame):
         self._update_theme_colors()
 
     def _update_theme_colors(self, theme_name: str = None, **kwargs):
-        accent = ThemeManager.get_current_accent_color()
-        curr_theme = theme_name or ThemeManager.get_current_theme_name()
+        if theme_name:
+            self._current_theme_name = theme_name
+        curr_theme = getattr(self, '_current_theme_name', None) or ThemeManager.get_current_theme_name()
+        accent = ThemeManager.get_current_accent_color(curr_theme)
         is_light = curr_theme in ("Pearl Light", "Как дома")
         
-        title_color = accent if not is_light else ("#0A246A" if curr_theme == "Как дома" else "#028090")
-        sub_color = "#444444" if is_light else "#94A3B8"
+        if curr_theme == "Как дома":
+            title_color = "#0A246A"
+        elif curr_theme == "Pearl Light":
+            title_color = "#028090"
+        elif curr_theme == "Deep Violet Glass":
+            title_color = "#D8B4FE"
+        else:
+            title_color = accent
+
+        sub_color = "#334155" if is_light else "#CBD5E1"
+        status_loaded_color = "#059669" if is_light else "#34D399"
         
         if hasattr(self, 'icon_badge'):
             self.icon_badge.set_color(title_color)
 
-        self.lbl_title.setStyleSheet(f"color: {title_color}; font-size: 12px; font-weight: bold; background: transparent;")
+        f_size = "12px" if self.height() < 65 else ("13px" if self.height() < 90 else "14px")
+        s_size = "11.5px" if self.height() < 65 else ("12.5px" if self.height() < 90 else "13px")
+
+        self.lbl_title.setStyleSheet(f"color: {title_color}; font-size: {f_size}; font-weight: 800; background: transparent;")
         if not self.file_path:
-            self.lbl_status.setStyleSheet(f"color: {sub_color}; font-size: 10px; background: transparent;")
+            self.lbl_status.setStyleSheet(f"color: {sub_color}; font-size: {s_size}; font-weight: 600; background: transparent;")
+        else:
+            self.lbl_status.setStyleSheet(f"color: {status_loaded_color}; font-size: {s_size}; font-weight: 700; background: transparent;")
+
+        theme_configs = {
+            "Dark Tech Azure": {
+                "bg_default": "rgba(15, 23, 42, 0.70)",
+                "bg_hover": "rgba(18, 28, 50, 0.85)",
+                "bg_linked": "rgba(0, 242, 254, 0.10)",
+                "bg_drag": "rgba(0, 242, 254, 0.15)",
+                "border": "rgba(0, 242, 254, 0.35)",
+                "accent": "#00F2FE",
+                "radius": "10px"
+            },
+            "Pearl Light": {
+                "bg_default": "rgba(255, 255, 255, 0.90)",
+                "bg_hover": "#FFFFFF",
+                "bg_linked": "rgba(2, 128, 144, 0.08)",
+                "bg_drag": "rgba(2, 128, 144, 0.14)",
+                "border": "#028090",
+                "accent": "#028090",
+                "radius": "10px"
+            },
+            "Cyberpunk Neon": {
+                "bg_default": "rgba(36, 5, 54, 0.70)",
+                "bg_hover": "rgba(48, 7, 72, 0.85)",
+                "bg_linked": "rgba(255, 0, 127, 0.12)",
+                "bg_drag": "rgba(255, 0, 127, 0.18)",
+                "border": "rgba(255, 0, 127, 0.40)",
+                "accent": "#FF007F",
+                "radius": "10px"
+            },
+            "Emerald Cyber": {
+                "bg_default": "rgba(6, 38, 24, 0.70)",
+                "bg_hover": "rgba(9, 51, 32, 0.85)",
+                "bg_linked": "rgba(16, 185, 129, 0.10)",
+                "bg_drag": "rgba(16, 185, 129, 0.15)",
+                "border": "rgba(16, 185, 129, 0.40)",
+                "accent": "#10B981",
+                "radius": "10px"
+            },
+            "Deep Violet Glass": {
+                "bg_default": "rgba(24, 10, 56, 0.70)",
+                "bg_hover": "rgba(37, 15, 82, 0.85)",
+                "bg_linked": "rgba(168, 85, 247, 0.12)",
+                "bg_drag": "rgba(168, 85, 247, 0.18)",
+                "border": "rgba(168, 85, 247, 0.40)",
+                "accent": "#A855F7",
+                "radius": "10px"
+            },
+            "Как дома": {
+                "bg_default": "#FFFFFF",
+                "bg_hover": "#F8FAFC",
+                "bg_linked": "#FFFFFF",
+                "bg_drag": "#F0F4F8",
+                "border": "#7F9DB9",
+                "accent": "#0A246A",
+                "radius": "4px"
+            }
+        }
+        cfg = theme_configs.get(curr_theme, theme_configs["Dark Tech Azure"])
+
+        self.setStyleSheet(f"""
+            QFrame#GlassCard {{
+                background: {cfg["bg_default"]};
+                border: 1.5px dashed {cfg["border"]};
+                border-radius: {cfg["radius"]};
+            }}
+            QFrame#GlassCard:hover, QFrame#GlassCard[hover="true"] {{
+                background: {cfg["bg_hover"]};
+                border: 1.5px dashed {cfg["accent"]};
+                border-radius: {cfg["radius"]};
+            }}
+            QFrame#GlassCard[state="linked"] {{
+                background: {cfg["bg_linked"]};
+                border: 1.5px solid {cfg["accent"]};
+                border-radius: {cfg["radius"]};
+            }}
+            QFrame#GlassCard[state="warning"] {{
+                background: rgba(239, 68, 68, 0.10);
+                border: 1.5px solid #EF4444;
+                border-radius: {cfg["radius"]};
+            }}
+            QFrame#GlassCard[drag="true"] {{
+                background: {cfg["bg_drag"]};
+                border: 2px dashed {cfg["accent"]};
+                border-radius: {cfg["radius"]};
+            }}
+        """)
 
     def set_compact_mode(self, is_compact: bool):
         """Адаптивный компактный режим для малых размеров карточек."""
         self.is_compact = is_compact
         if is_compact:
             self.icon_badge.setVisible(False)
-            if not self.file_path:
-                self.lbl_status.setVisible(False)
-            else:
-                self.lbl_status.setVisible(True)
-            self.setMinimumHeight(45)
-            self.box_layout.setContentsMargins(4, 2, 4, 2)
-        else:
-            self.icon_badge.setVisible(True)
+            self.setMinimumHeight(46)
+            self.box_layout.setContentsMargins(6, 3, 6, 3)
+            self.box_layout.setSpacing(1)
             self.lbl_status.setVisible(True)
-            self.setMinimumHeight(96)
-            self.box_layout.setContentsMargins(10, 8, 10, 8)
+        else:
+            self.setMinimumHeight(52)
+            self.box_layout.setContentsMargins(8, 4, 8, 4)
+            self.box_layout.setSpacing(2)
+            self._update_responsive_view()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._update_responsive_view()
+        self._update_elided_status_text()
+
+    def _update_responsive_view(self):
         h = self.height()
-        w = self.width()
-        
-        if h < 65:
+        if self.is_compact or h < 74:
             self.icon_badge.setVisible(False)
-            self.box_layout.setContentsMargins(4, 2, 4, 2)
+            self.box_layout.setContentsMargins(6, 3, 6, 3)
             self.box_layout.setSpacing(1)
-        elif h < 95:
-            self.icon_badge.setVisible(w > 160)
-            self.icon_badge.setFixedSize(26, 26)
-            self.box_layout.setContentsMargins(6, 4, 6, 4)
-            self.box_layout.setSpacing(2)
         else:
             self.icon_badge.setVisible(True)
-            self.icon_badge.setFixedSize(28, 28)
-            self.box_layout.setContentsMargins(10, 8, 10, 8)
-            self.box_layout.setSpacing(3)
-            
-        self._update_elided_status_text()
+            self.icon_badge.setFixedSize(24, 24)
+            self.box_layout.setContentsMargins(8, 4, 8, 4)
+            self.box_layout.setSpacing(2)
+        self._update_theme_colors()
 
     def _get_title_color(self) -> str:
         curr_theme = ThemeManager.get_current_theme_name()
@@ -151,37 +248,53 @@ class ExcelDropZone(QFrame):
         return accent
 
     def _update_elided_status_text(self):
+        max_w = max(50, self.width() - 16)
         if not self.file_path or not os.path.exists(self.file_path):
+            fm = self.lbl_status.fontMetrics()
+            elided_ph = fm.elidedText(self.placeholder, Qt.TextElideMode.ElideMiddle, max_w)
+            self.lbl_status.setText(elided_ph)
+            self.setToolTip(f"{self.title}\n{self.placeholder}")
             return
+
         filename = os.path.basename(self.file_path)
         fm = self.lbl_status.fontMetrics()
-        max_w = max(60, self.width() - 20)
         elided_filename = fm.elidedText(filename, Qt.TextElideMode.ElideMiddle, max_w)
         
+        curr_theme = ThemeManager.get_current_theme_name()
+        is_light = curr_theme in ("Pearl Light", "Как дома")
+        size_color = "#64748B" if is_light else "#94A3B8"
+
         try:
             sz_bytes = os.path.getsize(self.file_path)
             sz_str = f"{sz_bytes / 1024:.1f} KB" if sz_bytes < 1024 * 1024 else f"{sz_bytes / (1024 * 1024):.2f} MB"
-            meta_info = f"<br/><span style='color: #888888; font-size: 9px;'>📄 {sz_str}</span>"
+            meta_info = f" <span style='color: {size_color}; font-size: 11px; font-weight: normal;'>({sz_str})</span>"
         except Exception:
             meta_info = ""
 
-        if self.height() < 65:
+        if self.height() < 70:
             self.lbl_status.setText(f"✓ <b>{elided_filename}</b>")
         else:
             self.lbl_status.setText(f"✓ <b>{elided_filename}</b>{meta_info}")
+        self.setToolTip(f"{self.title}\n{self.file_path}")
 
-    def set_file_path(self, path: str):
+    def set_file_path(self, path: str, notify: bool = True):
+        prev_path = self.file_path
         self.file_path = path
+        curr_theme = ThemeManager.get_current_theme_name()
+        is_light = curr_theme in ("Pearl Light", "Как дома")
+        status_color = "#059669" if is_light else "#10B981"
+
         if path and os.path.exists(path):
             self._update_elided_status_text()
-            self.lbl_status.setStyleSheet("color: #10B981; font-size: 11px; font-weight: bold; background: transparent;")
+            self.lbl_status.setStyleSheet(f"color: {status_color}; font-size: 12.5px; font-weight: bold; background: transparent;")
         else:
-            self.lbl_status.setText(self.placeholder)
+            self._update_elided_status_text()
             self._update_theme_colors()
 
         if self.is_compact and self.file_path:
             self.lbl_status.setVisible(True)
-        self.file_dropped.emit(path)
+        if notify and (not prev_path or os.path.normpath(prev_path) != os.path.normpath(path)):
+            self.file_dropped.emit(path)
 
     def mousePressEvent(self, event):
         """Клик по любой области карточки вызывает окно выбора файла."""
@@ -191,7 +304,7 @@ class ExcelDropZone(QFrame):
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
-            if any(url.toLocalFile().endswith(('.xlsx', '.xls')) for url in event.mimeData().urls()):
+            if any(url.toLocalFile().endswith(('.xlsx', '.xls')) or os.path.isdir(url.toLocalFile()) for url in event.mimeData().urls()):
                 event.acceptProposedAction()
                 self.setProperty("drag", True)
                 self.style().unpolish(self)
@@ -206,8 +319,15 @@ class ExcelDropZone(QFrame):
         self.dragLeaveEvent(event)
         for url in event.mimeData().urls():
             path = url.toLocalFile()
-            if path.endswith(('.xlsx', '.xls')):
-                self.set_file_path(path)
+            if os.path.isdir(path):
+                xlsx_files = [os.path.join(path, f) for f in os.listdir(path) if f.endswith(('.xlsx', '.xls')) and not f.startswith('~$') and not any(ex in f.lower() for ex in ['сопроводит', 'акт', 'аркус'])]
+                if xlsx_files:
+                    self.set_file_path(xlsx_files[0], notify=True)
+                else:
+                    self.set_file_path(path, notify=True)
+                break
+            elif path.endswith(('.xlsx', '.xls')):
+                self.set_file_path(path, notify=True)
                 break
 
     def open_file_dialog(self):
@@ -243,16 +363,20 @@ class ExcelDropZone(QFrame):
         self.setProperty("state", state)
         self.style().unpolish(self)
         self.style().polish(self)
-        accent = ThemeManager.get_current_accent_color()
+        curr_theme = getattr(self, '_current_theme_name', None) or ThemeManager.get_current_theme_name()
+        accent = ThemeManager.get_current_accent_color(curr_theme)
+        is_light = curr_theme in ("Pearl Light", "Как дома")
         if message:
             self.lbl_status.setText(message)
             if state == "linked":
-                self.lbl_status.setStyleSheet(f"color: {accent}; font-size: 11px; font-weight: bold; background: transparent;")
+                acc_txt = "#0A246A" if curr_theme == "Как дома" else ("#028090" if is_light else accent)
+                self.lbl_status.setStyleSheet(f"color: {acc_txt}; font-size: 12.5px; font-weight: bold; background: transparent;")
             elif state == "warning":
-                self.lbl_status.setStyleSheet("color: #F87171; font-size: 11px; font-weight: bold; background: transparent;")
+                self.lbl_status.setStyleSheet("color: #EF4444; font-size: 12.5px; font-weight: bold; background: transparent;")
         elif not self.file_path:
             self.lbl_status.setText(self.placeholder)
-            self.lbl_status.setStyleSheet("color: #94A3B8; font-size: 11px; background: transparent;")
+            sub_col = "#334155" if is_light else "#94A3B8"
+            self.lbl_status.setStyleSheet(f"color: {sub_col}; font-size: 12.5px; background: transparent;")
 
 
 class WaterGaugeWidget(QWidget):
@@ -447,16 +571,24 @@ class ToastNotification(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         border_card = QFrame()
+        curr_theme = ThemeManager.get_current_theme_name()
+        is_light = curr_theme in ("Pearl Light", "Как дома")
         color_map = {"INFO": ("#00F2FE", "ℹ️"), "SUCCESS": ("#10B981", "✅"), "ERROR": ("#EF4444", "❌")}
         border_color, icon = color_map.get(level.upper(), ("#00F2FE", "ℹ️"))
+        if is_light:
+            bg_col = "rgba(255, 255, 255, 0.96)" if curr_theme == "Как дома" else "rgba(248, 250, 252, 0.95)"
+            txt_col = "#000000" if curr_theme == "Как дома" else "#0F172A"
+        else:
+            bg_col = "rgba(15, 23, 42, 0.9)"
+            txt_col = "#F8FAFC"
 
-        border_card.setStyleSheet(f"QFrame {{ background-color: rgba(15, 23, 42, 0.9); border: 1.5px solid {border_color}; border-radius: 10px; }}")
+        border_card.setStyleSheet(f"QFrame {{ background-color: {bg_col}; border: 1.5px solid {border_color}; border-radius: 10px; }}")
         card_layout = QHBoxLayout(border_card)
         card_layout.setContentsMargins(16, 12, 16, 12)
 
         lbl = QLabel(f"{icon}  {message}")
         lbl.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        lbl.setStyleSheet("color: #F8FAFC; background: transparent;")
+        lbl.setStyleSheet(f"color: {txt_col}; background: transparent;")
 
         card_layout.addWidget(lbl)
         layout.addWidget(border_card)

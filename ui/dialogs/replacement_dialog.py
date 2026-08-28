@@ -76,7 +76,7 @@ class MeterReplacementDialog(QDialog):
             | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.resize(680, 620)
+        self.resize(720, 640)
 
         self.apts_data = apts_data or {}
         self.closed_records = list(closed_meters or [])
@@ -134,14 +134,14 @@ class MeterReplacementDialog(QDialog):
         header_row.addWidget(self.icon_badge)
 
         title_vbox = QVBoxLayout()
-        title_vbox.setSpacing(1)
+        title_vbox.setSpacing(2)
 
         self.lbl_main_title = QLabel("Мастер замен счетчиков ИПУ")
         title_color = "#0A246A" if curr_theme == "Как дома" else ("#0F172A" if is_light else "#F8FAFC")
-        self.lbl_main_title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {title_color}; background: transparent;")
+        self.lbl_main_title.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {title_color}; background: transparent;")
 
         self.lbl_subtitle = QLabel("Управление закрытыми и вновь установленными приборами учета")
-        self.lbl_subtitle.setStyleSheet("font-size: 11px; color: #94A3B8; background: transparent;")
+        self.lbl_subtitle.setStyleSheet("font-size: 12.5px; color: #94A3B8; background: transparent;")
 
         title_vbox.addWidget(self.lbl_main_title)
         title_vbox.addWidget(self.lbl_subtitle)
@@ -149,7 +149,7 @@ class MeterReplacementDialog(QDialog):
 
         # Кнопка закрытия [✕]
         self.btn_close = QPushButton("✕")
-        self.btn_close.setFixedSize(28, 28)
+        self.btn_close.setFixedSize(30, 30)
         self.btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_close.setToolTip("Закрыть окно (Esc)")
         self.btn_close.setStyleSheet("""
@@ -157,8 +157,8 @@ class MeterReplacementDialog(QDialog):
                 background: rgba(255, 255, 255, 0.06);
                 color: #94A3B8;
                 border: 1px solid rgba(255, 255, 255, 0.12);
-                border-radius: 14px;
-                font-size: 13px;
+                border-radius: 15px;
+                font-size: 14px;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -184,33 +184,35 @@ class MeterReplacementDialog(QDialog):
         search_row.setSpacing(8)
 
         lbl_search_icon = QLabel()
-        lbl_search_icon.setPixmap(get_svg_icon("search", color=accent).pixmap(16, 16))
+        lbl_search_icon.setPixmap(get_svg_icon("search", color=accent).pixmap(18, 18))
         lbl_search_icon.setStyleSheet("background: transparent;")
         search_row.addWidget(lbl_search_icon)
 
         lbl_search = QLabel("Поиск помещения:", objectName="FieldLabel")
-        lbl_search.setStyleSheet("font-size: 11px; font-weight: bold; color: #94A3B8; background: transparent;")
+        lbl_search.setStyleSheet("font-size: 13px; font-weight: bold; color: #94A3B8; background: transparent;")
         search_row.addWidget(lbl_search)
 
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Введите номер квартиры или название...")
         self.search_edit.setClearButtonEnabled(True)
-        self.search_edit.setMinimumHeight(28)
+        self.search_edit.setMinimumHeight(34)
+        self.search_edit.setStyleSheet("font-size: 13.5px;")
         self.search_edit.textChanged.connect(self._on_search_text_changed)
         search_row.addWidget(self.search_edit, 1)
         form_layout.addLayout(search_row)
 
         # Выбор квартиры и прибора в 2 колонки
         select_grid = QHBoxLayout()
-        select_grid.setSpacing(10)
+        select_grid.setSpacing(12)
 
         # Колонка Квартира
         col_apt = QVBoxLayout()
-        col_apt.setSpacing(3)
+        col_apt.setSpacing(4)
         lbl_apt = QLabel("Квартира / Помещение:", objectName="FieldLabel")
-        lbl_apt.setStyleSheet("font-size: 11px; font-weight: bold; color: #94A3B8; background: transparent;")
+        lbl_apt.setStyleSheet("font-size: 13px; font-weight: bold; color: #94A3B8; background: transparent;")
         self.combo_apt = QComboBox()
-        self.combo_apt.setMinimumHeight(28)
+        self.combo_apt.setMinimumHeight(34)
+        self.combo_apt.setStyleSheet("font-size: 13px;")
         self.combo_apt.currentTextChanged.connect(self._update_meters_combo)
         col_apt.addWidget(lbl_apt)
         col_apt.addWidget(self.combo_apt)
@@ -218,11 +220,12 @@ class MeterReplacementDialog(QDialog):
 
         # Колонка Прибор
         col_meter = QVBoxLayout()
-        col_meter.setSpacing(3)
+        col_meter.setSpacing(4)
         lbl_meter = QLabel("Прибор учета:", objectName="FieldLabel")
-        lbl_meter.setStyleSheet("font-size: 11px; font-weight: bold; color: #94A3B8; background: transparent;")
+        lbl_meter.setStyleSheet("font-size: 13px; font-weight: bold; color: #94A3B8; background: transparent;")
         self.combo_meter = QComboBox()
-        self.combo_meter.setMinimumHeight(28)
+        self.combo_meter.setMinimumHeight(34)
+        self.combo_meter.setStyleSheet("font-size: 13px;")
         self.combo_meter.currentIndexChanged.connect(self._on_meter_selected)
         col_meter.addWidget(lbl_meter)
         col_meter.addWidget(self.combo_meter)
@@ -232,24 +235,26 @@ class MeterReplacementDialog(QDialog):
 
         # Показания (Финальное старого и Начальное нового)
         readings_grid = QHBoxLayout()
-        readings_grid.setSpacing(10)
+        readings_grid.setSpacing(12)
 
         col_fin = QVBoxLayout()
-        col_fin.setSpacing(3)
+        col_fin.setSpacing(4)
         lbl_fin = QLabel("Финальное показание (старый ИПУ):", objectName="FieldLabel")
-        lbl_fin.setStyleSheet("font-size: 11px; font-weight: bold; color: #94A3B8; background: transparent;")
+        lbl_fin.setStyleSheet("font-size: 13px; font-weight: bold; color: #94A3B8; background: transparent;")
         self.txt_final = QLineEdit("0.0")
-        self.txt_final.setMinimumHeight(28)
+        self.txt_final.setMinimumHeight(34)
+        self.txt_final.setStyleSheet("font-family: 'Consolas', monospace; font-size: 14px; font-weight: bold;")
         col_fin.addWidget(lbl_fin)
         col_fin.addWidget(self.txt_final)
         readings_grid.addLayout(col_fin, 1)
 
         col_init = QVBoxLayout()
-        col_init.setSpacing(3)
+        col_init.setSpacing(4)
         lbl_init = QLabel("Начальное показание (новый ИПУ):", objectName="FieldLabel")
-        lbl_init.setStyleSheet("font-size: 11px; font-weight: bold; color: #94A3B8; background: transparent;")
+        lbl_init.setStyleSheet("font-size: 13px; font-weight: bold; color: #94A3B8; background: transparent;")
         self.txt_initial = QLineEdit("0.0")
-        self.txt_initial.setMinimumHeight(28)
+        self.txt_initial.setMinimumHeight(34)
+        self.txt_initial.setStyleSheet("font-family: 'Consolas', monospace; font-size: 14px; font-weight: bold;")
         col_init.addWidget(lbl_init)
         col_init.addWidget(self.txt_initial)
         readings_grid.addLayout(col_init, 1)
@@ -259,7 +264,8 @@ class MeterReplacementDialog(QDialog):
         # Кнопка Добавить / Обновить
         self.btn_add = QPushButton("+ Добавить / Обновить замену", objectName="PrimaryButton")
         self.btn_add.setIcon(get_svg_icon("plus", color="#020617"))
-        self.btn_add.setMinimumHeight(32)
+        self.btn_add.setMinimumHeight(36)
+        self.btn_add.setStyleSheet("font-size: 13.5px; font-weight: 800;")
         self.btn_add.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_add.clicked.connect(self._add_replacement)
         form_layout.addWidget(self.btn_add)
@@ -271,18 +277,19 @@ class MeterReplacementDialog(QDialog):
         list_hdr_layout.setSpacing(8)
 
         self.lbl_list_hdr = QLabel("Зафиксированные замены:", objectName="SectionTitle")
-        self.lbl_list_hdr.setStyleSheet("font-size: 12px; font-weight: bold; background: transparent;")
+        self.lbl_list_hdr.setStyleSheet("font-size: 14px; font-weight: bold; background: transparent;")
         list_hdr_layout.addWidget(self.lbl_list_hdr)
 
         self.lbl_count_badge = QLabel("(0)")
-        self.lbl_count_badge.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {accent}; background: transparent;")
+        self.lbl_count_badge.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {accent}; background: transparent;")
         list_hdr_layout.addWidget(self.lbl_count_badge)
 
         list_hdr_layout.addStretch()
 
         self.btn_reset_all = QPushButton("Сбросить все", objectName="DangerButton")
         self.btn_reset_all.setIcon(get_svg_icon("trash", color="#F87171"))
-        self.btn_reset_all.setMinimumHeight(26)
+        self.btn_reset_all.setMinimumHeight(30)
+        self.btn_reset_all.setStyleSheet("font-size: 12.5px; font-weight: bold;")
         self.btn_reset_all.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_reset_all.clicked.connect(self._reset_all)
         list_hdr_layout.addWidget(self.btn_reset_all)
@@ -296,8 +303,8 @@ class MeterReplacementDialog(QDialog):
         self.scroll_area.setStyleSheet("""
             QScrollArea {
                 background: transparent !important;
-                border: 1px solid rgba(255, 255, 255, 0.08);
-                border-radius: 8px;
+                border: 1.5px solid rgba(255, 255, 255, 0.12);
+                border-radius: 10px;
             }
             QScrollArea > QWidget > QWidget {
                 background: transparent !important;
@@ -307,8 +314,8 @@ class MeterReplacementDialog(QDialog):
         self.scroll_content = QWidget()
         self.scroll_content.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.scroll_layout = QVBoxLayout(self.scroll_content)
-        self.scroll_layout.setContentsMargins(6, 6, 6, 6)
-        self.scroll_layout.setSpacing(6)
+        self.scroll_layout.setContentsMargins(8, 8, 8, 8)
+        self.scroll_layout.setSpacing(8)
         self.scroll_layout.addStretch()
 
         self.scroll_area.setWidget(self.scroll_content)
@@ -319,20 +326,22 @@ class MeterReplacementDialog(QDialog):
         btn_box.setSpacing(10)
 
         self.lbl_footer_info = QLabel("")
-        self.lbl_footer_info.setStyleSheet("font-size: 11px; color: #94A3B8; background: transparent;")
+        self.lbl_footer_info.setStyleSheet("font-size: 12px; color: #94A3B8; background: transparent;")
         btn_box.addWidget(self.lbl_footer_info)
         btn_box.addStretch()
 
         self.btn_cancel = QPushButton("Отмена", objectName="SecondaryButton")
-        self.btn_cancel.setMinimumHeight(32)
-        self.btn_cancel.setMinimumWidth(90)
+        self.btn_cancel.setMinimumHeight(36)
+        self.btn_cancel.setMinimumWidth(100)
+        self.btn_cancel.setStyleSheet("font-size: 13px; font-weight: 600;")
         self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_cancel.clicked.connect(self.reject)
 
         self.btn_save = QPushButton("Сохранить и применить", objectName="PrimaryButton")
         self.btn_save.setIcon(get_svg_icon("save", color="#020617"))
-        self.btn_save.setMinimumHeight(32)
-        self.btn_save.setMinimumWidth(160)
+        self.btn_save.setMinimumHeight(36)
+        self.btn_save.setMinimumWidth(180)
+        self.btn_save.setStyleSheet("font-size: 13.5px; font-weight: 800;")
         self.btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save.clicked.connect(self.accept)
 

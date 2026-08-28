@@ -82,6 +82,13 @@ class DonateDialog(QDialog):
         accent = ThemeManager.get_current_accent_color()
 
         self.card = HoverGlassCard()
+        if is_light:
+            card_bg = "#FFFFFF"
+            card_border = "#0A246A" if curr_theme == "Как дома" else "#028090"
+            self.card.setStyleSheet(f"QFrame#GlassCard {{ background-color: {card_bg}; border: 1.5px solid {card_border}; border-radius: 18px; }} QFrame#GlassCard:hover, QFrame#GlassCard[hover=\"true\"] {{ background-color: {card_bg}; border: 1.5px solid {card_border}; }}")
+        else:
+            self.card.setStyleSheet(f"QFrame#GlassCard {{ background-color: #0B1736; border: 1.5px solid {accent}; border-radius: 18px; }} QFrame#GlassCard:hover, QFrame#GlassCard[hover=\"true\"] {{ background-color: #0F2048; border: 1.5px solid {accent}; }}")
+
         layout = QVBoxLayout(self.card)
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(14)
@@ -119,6 +126,13 @@ class DonateDialog(QDialog):
         layout.addLayout(header_row)
 
         card_frame = HoverGlassCard()
+        if is_light:
+            inner_bg = "rgba(10, 36, 106, 0.04)" if curr_theme == "Как дома" else "rgba(2, 128, 144, 0.05)"
+            inner_border = "#7F9DB9" if curr_theme == "Как дома" else "rgba(2, 128, 144, 0.25)"
+            card_frame.setStyleSheet(f"QFrame#GlassCard {{ background-color: {inner_bg}; border: 1px solid {inner_border}; border-radius: 12px; }} QFrame#GlassCard:hover, QFrame#GlassCard[hover=\"true\"] {{ background-color: {inner_bg}; border: 1px solid {inner_border}; }}")
+        else:
+            card_frame.setStyleSheet(f"QFrame#GlassCard {{ background-color: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.10); border-radius: 12px; }}")
+
         card_lay = QVBoxLayout(card_frame)
         card_lay.setContentsMargins(16, 12, 16, 12)
         card_lay.setSpacing(6)
@@ -184,6 +198,14 @@ class BeachRestDialog(QDialog):
         is_light = curr_theme in ("Pearl Light", "Как дома")
 
         self.card = HoverGlassCard()
+        if is_light:
+            card_bg = "#FFFFFF"
+            card_border = "#0A246A" if curr_theme == "Как дома" else "#028090"
+            self.card.setStyleSheet(f"QFrame#GlassCard {{ background-color: {card_bg}; border: 1.5px solid {card_border}; border-radius: 18px; }} QFrame#GlassCard:hover, QFrame#GlassCard[hover=\"true\"] {{ background-color: {card_bg}; border: 1.5px solid {card_border}; }}")
+        else:
+            accent = ThemeManager.get_current_accent_color()
+            self.card.setStyleSheet(f"QFrame#GlassCard {{ background-color: #0B1736; border: 1.5px solid {accent}; border-radius: 18px; }} QFrame#GlassCard:hover, QFrame#GlassCard[hover=\"true\"] {{ background-color: #0F2048; border: 1.5px solid {accent}; }}")
+
         layout = QVBoxLayout(self.card)
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(12)
@@ -221,6 +243,13 @@ class BeachRestDialog(QDialog):
         layout.addLayout(header_row)
 
         card_inner = HoverGlassCard()
+        if is_light:
+            inner_bg = "rgba(10, 36, 106, 0.04)" if curr_theme == "Как дома" else "rgba(2, 128, 144, 0.05)"
+            inner_border = "#7F9DB9" if curr_theme == "Как дома" else "rgba(2, 128, 144, 0.25)"
+            card_inner.setStyleSheet(f"QFrame#GlassCard {{ background-color: {inner_bg}; border: 1px solid {inner_border}; border-radius: 12px; }} QFrame#GlassCard:hover, QFrame#GlassCard[hover=\"true\"] {{ background-color: {inner_bg}; border: 1px solid {inner_border}; }}")
+        else:
+            card_inner.setStyleSheet(f"QFrame#GlassCard {{ background-color: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.10); border-radius: 12px; }}")
+
         card_lay = QVBoxLayout(card_inner)
         card_lay.setContentsMargins(8, 8, 8, 8)
 
@@ -271,6 +300,13 @@ class FeedbackDialog(QDialog):
         accent = ThemeManager.get_current_accent_color()
 
         self.card = HoverGlassCard()
+        if is_light:
+            card_bg = "#FFFFFF"
+            card_border = "#0A246A" if curr_theme == "Как дома" else "#028090"
+            self.card.setStyleSheet(f"QFrame#GlassCard {{ background-color: {card_bg}; border: 1.5px solid {card_border}; border-radius: 18px; }} QFrame#GlassCard:hover, QFrame#GlassCard[hover=\"true\"] {{ background-color: {card_bg}; border: 1.5px solid {card_border}; }}")
+        else:
+            self.card.setStyleSheet(f"QFrame#GlassCard {{ background-color: #0B1736; border: 1.5px solid {accent}; border-radius: 18px; }} QFrame#GlassCard:hover, QFrame#GlassCard[hover=\"true\"] {{ background-color: #0F2048; border: 1.5px solid {accent}; }}")
+
         layout = QVBoxLayout(self.card)
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(14)
@@ -308,6 +344,13 @@ class FeedbackDialog(QDialog):
         layout.addLayout(header_row)
 
         info_card = HoverGlassCard()
+        if is_light:
+            inner_bg = "rgba(10, 36, 106, 0.04)" if curr_theme == "Как дома" else "rgba(2, 128, 144, 0.05)"
+            inner_border = "#7F9DB9" if curr_theme == "Как дома" else "rgba(2, 128, 144, 0.25)"
+            info_card.setStyleSheet(f"QFrame#GlassCard {{ background-color: {inner_bg}; border: 1px solid {inner_border}; border-radius: 12px; }} QFrame#GlassCard:hover, QFrame#GlassCard[hover=\"true\"] {{ background-color: {inner_bg}; border: 1px solid {inner_border}; }}")
+        else:
+            info_card.setStyleSheet(f"QFrame#GlassCard {{ background-color: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.10); border-radius: 12px; }}")
+
         info_lay = QVBoxLayout(info_card)
         info_lay.setContentsMargins(16, 12, 16, 12)
         info_lay.setSpacing(6)
@@ -452,21 +495,27 @@ class AboutPage(QWidget):
         info_lay.addLayout(app_header_lay)
 
         self.appVer_label = QLabel(f"Версия: v{APP_VERSION} (PySide6 Apple Frosted Glass & 3D Wave Edition)")
-        self.appVer_label.setStyleSheet("font-size: 12px; color: #94A3B8; font-weight: 600;")
+        self.appVer_label.setStyleSheet("font-size: 13px; color: #94A3B8; font-weight: 600;")
 
         btns_row1 = QHBoxLayout()
         btns_row1.setSpacing(10)
 
         self.btn_check_update = QPushButton("Проверить обновления", objectName="PrimaryButton")
         self.btn_check_update.setIcon(get_svg_icon("update", color="#020617" if not is_light else "#FFFFFF"))
+        self.btn_check_update.setMinimumHeight(38)
+        self.btn_check_update.setStyleSheet("font-size: 13px; font-weight: 700;")
         self.btn_check_update.clicked.connect(self.check_updates)
 
         self.btn_welcome_setup = QPushButton("Стиль и язык", objectName="SecondaryButton")
         self.btn_welcome_setup.setIcon(get_svg_icon("edit"))
+        self.btn_welcome_setup.setMinimumHeight(38)
+        self.btn_welcome_setup.setStyleSheet("font-size: 13px; font-weight: 600;")
         self.btn_welcome_setup.clicked.connect(self.show_welcome_setup)
 
         self.btn_onboarding = QPushButton("Обучение проводке", objectName="SecondaryButton")
         self.btn_onboarding.setIcon(get_svg_icon("sparkles"))
+        self.btn_onboarding.setMinimumHeight(38)
+        self.btn_onboarding.setStyleSheet("font-size: 13px; font-weight: 600;")
         self.btn_onboarding.clicked.connect(self.restart_onboarding)
 
         btns_row1.addWidget(self.btn_check_update)
@@ -479,14 +528,20 @@ class AboutPage(QWidget):
 
         self.btn_feedback = QPushButton("Обратная связь", objectName="SecondaryButton")
         self.btn_feedback.setIcon(get_svg_icon("mail"))
+        self.btn_feedback.setMinimumHeight(38)
+        self.btn_feedback.setStyleSheet("font-size: 13px; font-weight: 600;")
         self.btn_feedback.clicked.connect(self.show_feedback_dialog)
 
         self.btn_donate = QPushButton("Поддержка", objectName="SecondaryButton")
         self.btn_donate.setIcon(get_svg_icon("about"))
+        self.btn_donate.setMinimumHeight(38)
+        self.btn_donate.setStyleSheet("font-size: 13px; font-weight: 600;")
         self.btn_donate.clicked.connect(self.show_donate)
 
         self.btn_beach = QPushButton("Морской Отдых", objectName="AccentButton")
         self.btn_beach.setIcon(get_svg_icon("run"))
+        self.btn_beach.setMinimumHeight(38)
+        self.btn_beach.setStyleSheet("font-size: 13px; font-weight: 800;")
         self.btn_beach.clicked.connect(self.show_beach)
 
         btns_row2.addWidget(self.btn_feedback)
@@ -608,6 +663,7 @@ class AboutPage(QWidget):
 
         # Информационная плашка с контактом и темой
         self.fb_info_box = HoverGlassCard()
+        self.fb_info_box.setObjectName("FbInfoBox")
         fb_box_lay = QVBoxLayout(self.fb_info_box)
         fb_box_lay.setContentsMargins(16, 12, 16, 12)
         fb_box_lay.setSpacing(6)
@@ -631,22 +687,26 @@ class AboutPage(QWidget):
 
         self.btn_fb_mailto = QPushButton("  Почтовый клиент", objectName="PrimaryButton")
         self.btn_fb_mailto.setIcon(get_svg_icon("mail", color="#FFFFFF" if is_light else "#020617"))
-        self.btn_fb_mailto.setMinimumHeight(34)
+        self.btn_fb_mailto.setMinimumHeight(36)
+        self.btn_fb_mailto.setStyleSheet("font-size: 13px; font-weight: 700;")
         self.btn_fb_mailto.clicked.connect(self._open_mailto)
 
         self.btn_fb_gmail = QPushButton("  Написать в Gmail", objectName="SecondaryButton")
         self.btn_fb_gmail.setIcon(get_svg_icon("external_link", color=accent))
-        self.btn_fb_gmail.setMinimumHeight(34)
+        self.btn_fb_gmail.setMinimumHeight(36)
+        self.btn_fb_gmail.setStyleSheet("font-size: 13px; font-weight: 600;")
         self.btn_fb_gmail.clicked.connect(self._open_gmail)
 
         self.btn_fb_mailru = QPushButton("  Написать в Mail.ru", objectName="SecondaryButton")
         self.btn_fb_mailru.setIcon(get_svg_icon("external_link", color=accent))
-        self.btn_fb_mailru.setMinimumHeight(34)
+        self.btn_fb_mailru.setMinimumHeight(36)
+        self.btn_fb_mailru.setStyleSheet("font-size: 13px; font-weight: 600;")
         self.btn_fb_mailru.clicked.connect(self._open_mailru)
 
         self.btn_fb_copy = QPushButton("  Скопировать шаблон", objectName="SecondaryButton")
         self.btn_fb_copy.setIcon(get_svg_icon("copy", color=accent))
-        self.btn_fb_copy.setMinimumHeight(34)
+        self.btn_fb_copy.setMinimumHeight(36)
+        self.btn_fb_copy.setStyleSheet("font-size: 13px; font-weight: 600;")
         self.btn_fb_copy.clicked.connect(self._copy_feedback_template)
 
         fb_btns_lay.addWidget(self.btn_fb_mailto)
@@ -939,7 +999,17 @@ class AboutPage(QWidget):
 
         # Блок обратной связи
         if hasattr(self, 'fb_info_box'):
-            self.fb_info_box.setStyleSheet(f"QFrame {{ background: {box_bg}; border: 1px solid {box_border}; border-radius: 12px; }}")
+            self.fb_info_box.setStyleSheet(f"""
+                QFrame#FbInfoBox {{
+                    background: {box_bg};
+                    border: 1px solid {box_border};
+                    border-radius: 12px;
+                }}
+                QFrame#FbInfoBox:hover, QFrame#FbInfoBox[hover="true"] {{
+                    background: {box_bg};
+                    border: 1px solid {box_border};
+                }}
+            """)
         if hasattr(self, 'lbl_fb_email_title'):
             self.lbl_fb_email_title.setStyleSheet(f"color: {sub_col}; font-size: 12px; font-weight: 500;")
         if hasattr(self, 'lbl_fb_email_val'):
@@ -1219,17 +1289,28 @@ class AboutPage(QWidget):
                 self.btn_beach.setStyleSheet("")
                 self.btn_beach.setIcon(get_svg_icon("run", color="#020617"))
 
-        # Карточки GlassCard под все 6 тем
+        # Карточки GlassCard под все 6 тем (базовый фон, фон при наведении, рамка, скругление)
         card_bgs = {
-            "Dark Tech Azure": ("#0B1736", "#00F2FE", "18px"),
-            "Cyberpunk Neon": ("#240536", "#FF007F", "18px"),
-            "Emerald Cyber": ("#062618", "#10B981", "18px"),
-            "Deep Violet Glass": ("#180A38", "#A855F7", "18px"),
-            "Pearl Light": ("#F8FAFC", "#028090", "18px"),
-            "Как дома": ("#FFFFFF", "#7F9DB9", "2px"),
+            "Dark Tech Azure": ("#0B1736", "#0F2048", "#00F2FE", "18px"),
+            "Cyberpunk Neon": ("#240536", "#300748", "#FF007F", "18px"),
+            "Emerald Cyber": ("#062618", "#093320", "#10B981", "18px"),
+            "Deep Violet Glass": ("#180A38", "#250F52", "#A855F7", "18px"),
+            "Pearl Light": ("#F8FAFC", "#FFFFFF", "#028090", "18px"),
+            "Как дома": ("#FFFFFF", "#F8FAFC", "#7F9DB9", "2px"),
         }
-        bg, border, rad = card_bgs.get(curr_theme, ("#0B1736", accent, "18px"))
-        card_style = f"QFrame#GlassCard {{ background-color: {bg}; border: 1.5px solid {border}; border-radius: {rad}; }}"
+        bg, bg_hover, border, rad = card_bgs.get(curr_theme, ("#0B1736", "#0F2048", accent, "18px"))
+        card_style = f"""
+            QFrame#GlassCard {{
+                background-color: {bg};
+                border: 1.5px solid {border};
+                border-radius: {rad};
+            }}
+            QFrame#GlassCard:hover, QFrame#GlassCard[hover="true"] {{
+                background-color: {bg_hover};
+                border: 1.5px solid {border};
+                border-radius: {rad};
+            }}
+        """
 
         for card_name in ('info_card', 'update_card', 'feedback_card', 'wave_card', 'vis_card'):
             if hasattr(self, card_name):

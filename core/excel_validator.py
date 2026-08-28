@@ -125,16 +125,71 @@ class ExcelFormatValidator:
         return landmarks
 
     @classmethod
-    def auto_fix_and_validate(cls, ws, total_cols=None, template_ws=None, sig_text=None, template_widths=None):
+    def canonical_apartment_key(cls, name):
+        """
+        Канонический ключ квартиры/помещения для сопоставления с шаблоном.
+        """
+        if not name:
+            return ""
+        s = str(name).strip().lower().replace('ё', 'е')
+        s = re.sub(r'\s+', ' ', s)
+        if re.match(r'^\d+$', s):
+            return f"apt:{s}"
+        m_apt = re.match(r'^(?:кв\.?|квартира)\s*([\d\w\-\/]+)$', s)
+        if m_apt:
+            clean_num = m_apt.group(1).replace(' ', '').replace('-', '')
+            return f"apt:{clean_num}"
+        m_pom = re.match(r'^(?:пом\.?|помещение)\s*([\d\w\-\/]+)$', s)
+        if m_pom:
+            clean_num = m_pom.group(1).replace(' ', '').replace('-', '')
+            return f"pom:{clean_num}"
+        m_off = re.match(r'^(?:офис)\s*([\d\w\-\/]+)$', s)
+        if m_off:
+            clean_num = m_off.group(1).replace(' ', '').replace('-', '')
+            return f"off:{clean_num}"
+        return s
+
+    @classmethod
+    def auto_fix_and_validate(cls, ws, total_cols=None, template_ws=None, sig_text=None, template_widths=None, template_apartments=None):
         """
         Гарантированное авто-исправление всех параметров оформления и валидация.
-        Возвращает отчет ValidationReport.
+        Возвращает отчет ValidationReport. Выделяет новые строки красным шрифтом.
         """
         report = ValidationReport(filename=getattr(ws, "title", "Sheet"))
         landmarks = cls.find_table_landmarks(ws, total_cols=total_cols)
         tot_cols = landmarks["total_cols"]
         itogo_r = landmarks["itogo_row"]
         data_start_r = landmarks["data_start_row"]
+
+        # Извлечение списка квартир из шаблона (если передан)
+        tpl_apts = set()
+        tpl_apt_keys = set()
+        if template_apartments:
+            tpl_apts = {re.sub(r'\s+', ' ', str(a).strip().lower()) for a in template_apartments if a}
+            tpl_apt_keys = {cls.canonical_apartment_key(a) for a in template_apartments if a}
+        elif template_ws:
+            try:
+                if isinstance(template_ws, str) and os.path.exists(template_ws):
+                    twb = openpyxl.load_workbook(template_ws, data_only=True)
+                    tws = twb.active
+                elif hasattr(template_ws, 'active'):
+                    tws = template_ws.active
+                else:
+                    tws = template_ws
+
+                t_landmarks = cls.find_table_landmarks(tws)
+                t_data_start = t_landmarks["data_start_row"]
+                t_itogo = t_landmarks["itogo_row"]
+                end_tr = t_itogo if t_itogo else (tws.max_row + 1)
+                for tr in range(t_data_start, end_tr):
+                    t_val = str(tws.cell(row=tr, column=1).value or '').strip()
+                    if t_val and not any(k in t_val.lower() for k in ['итого', 'всего', 'закрытые', 'замененные', 'директор', 'подпись', 'реестр']):
+                        tpl_apts.add(re.sub(r'\s+', ' ', t_val.lower()))
+                        ck = cls.canonical_apartment_key(t_val)
+                        if ck:
+                            tpl_apt_keys.add(ck)
+            except Exception:
+                pass
 
         std_border = cls.get_standard_border()
         empty_border = cls.get_empty_border()
@@ -145,8 +200,11 @@ class ExcelFormatValidator:
         align_center = Alignment(horizontal="center", vertical="center")
         align_center_wrap = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
+        COLOR_RED = "FFFF0000"
         font_data = Font(name=cls.DEFAULT_FONT_NAME, size=cls.DEFAULT_FONT_SIZE, bold=False)
         font_data_strike = Font(name=cls.DEFAULT_FONT_NAME, size=cls.DEFAULT_FONT_SIZE, bold=False, strike=True)
+        font_data_red = Font(name=cls.DEFAULT_FONT_NAME, size=cls.DEFAULT_FONT_SIZE, bold=False, color=COLOR_RED)
+        font_data_red_strike = Font(name=cls.DEFAULT_FONT_NAME, size=cls.DEFAULT_FONT_SIZE, bold=False, strike=True, color=COLOR_RED)
         font_sig = Font(name=cls.DEFAULT_FONT_NAME, size=cls.SIG_FONT_SIZE, bold=False)
 
         # 1. Заголовок (строки 1 и 2)
@@ -197,46 +255,75 @@ class ExcelFormatValidator:
         end_data_r = itogo_r if itogo_r else ws.max_row
         for r in range(data_start_r, end_data_r + 1):
             val1 = str(ws.cell(row=r, column=1).value or '').strip()
+            norm_val1 = re.sub(r'\s+', ' ', val1.lower())
+            val1_canon = cls.canonical_apartment_key(val1)
             is_itogo_line = (r == itogo_r) or (val1.lower() == 'итого')
             is_closed_header = 'закрытые' in val1.lower()
 
             ws.row_dimensions[r].height = 15.0
 
-            # Синхронизация зачеркивания по 3-колоночным блокам счетчиков (предыдущее, текущее, расход)
+            # Определение новой строки (появившейся после парсера/калькулятора/Аркуса, которой не было в шаблоне)
+            is_new_row = False
+            if not is_itogo_line and not is_closed_header and val1:
+                if tpl_apt_keys:
+                    if val1_canon not in tpl_apt_keys:
+                        is_new_row = True
+                elif tpl_apts:
+                    if norm_val1 not in tpl_apts:
+                        is_new_row = True
+                if not is_new_row:
+                    c1_cell = ws.cell(row=r, column=1)
+                    if c1_cell.font and c1_cell.font.color:
+                        c_rgb = str(getattr(c1_cell.font.color, 'rgb', '')).upper()
+                        if c_rgb in ("FFFF0000", "FF0000", "00FF0000", "RED"):
+                            is_new_row = True
+
+            if is_new_row:
+                report.add_issue(
+                    "new_row",
+                    f"R{r} ({val1})",
+                    f"Новая строка (отсутствовала в шаблоне): «{val1}» — выделена красным шрифтом",
+                    severity="INFO",
+                    fixed=True
+                )
+
+            # Синхронизация зачеркивания и красного цвета по 3-колоночным блокам счетчиков (предыдущее, текущее, расход)
             if not is_itogo_line and not is_closed_header:
                 for c_start in range(2, tot_cols + 1, 3):
                     c_end = min(c_start + 2, tot_cols)
                     meter_cells = [ws.cell(row=r, column=c) for c in range(c_start, c_end + 1)]
-                    if any(mc.font and mc.font.strike for mc in meter_cells if mc.value is not None and mc.value != ""):
-                        for mc in meter_cells:
-                            if mc.value is not None and mc.value != "":
-                                mc.font = copy(font_data_strike)
+                    meter_has_red = is_new_row or any(
+                        mc.font and mc.font.color and str(getattr(mc.font.color, 'rgb', '')).upper() in ("FFFF0000", "FF0000", "00FF0000", "RED")
+                        for mc in meter_cells
+                    )
+                    meter_has_strike = any(
+                        mc.font and mc.font.strike
+                        for mc in meter_cells if mc.value is not None and mc.value != ""
+                    )
+                    for mc in meter_cells:
+                        mc.border = copy(std_border)
+                        is_stk = bool(mc.font and mc.font.strike) or meter_has_strike
+                        if meter_has_red:
+                            mc.font = copy(font_data_red_strike if is_stk else font_data_red)
+                        elif is_stk:
+                            mc.font = copy(font_data_strike)
+                        else:
+                            mc.font = copy(font_data)
 
-            for c in range(1, tot_cols + 1):
-                cell = ws.cell(row=r, column=c)
-                
-                # Принудительно ставим стандартную серую рамку на всех 4 сторонах
-                cell.border = copy(std_border)
+                        mc.alignment = align_right
+                        if mc.value is not None and mc.value != "":
+                            if not str(mc.value).startswith('='):
+                                mc.number_format = "##########0.#####"
 
-                # Обработка шрифтов
-                if cell.font and cell.font.strike:
-                    cell.font = copy(font_data_strike)
-                else:
-                    if not cell.font or cell.font.name != cls.DEFAULT_FONT_NAME or cell.font.size not in (8.25, 8.5):
-                        cell.font = copy(font_data)
-
-                # Обработка выравнивания и числового формата
-                if c == 1:
-                    cell.alignment = align_left
-                    cell.number_format = "@"
-                else:
-                    if is_closed_header:
-                        cell.alignment = align_left
-                    else:
-                        cell.alignment = align_right
-                        if cell.value is not None and cell.value != "":
-                            if not str(cell.value).startswith('='):
-                                cell.number_format = "##########0.#####"
+            # Оформление 1-й колонки (имя квартиры / абонента)
+            cell1 = ws.cell(row=r, column=1)
+            cell1.border = copy(std_border)
+            cell1.alignment = align_left
+            cell1.number_format = "@"
+            if is_new_row:
+                cell1.font = copy(font_data_red)
+            elif not is_itogo_line and not is_closed_header:
+                cell1.font = copy(font_data)
 
         # 4. Промежуточные пустые строки и подпись
         if itogo_r:
@@ -331,28 +418,92 @@ class ExcelFormatValidator:
         ws.page_margins.header = 0.3
         ws.page_margins.footer = 0.3
 
+        new_rows_list = [issue.location for issue in report.issues if issue.category == "new_row"]
         report.stats = {
             "total_rows": ws.max_row,
             "total_cols": tot_cols,
             "itogo_row": itogo_r,
             "sig_row": landmarks.get("sig_row"),
             "orientation": ws.page_setup.orientation,
-            "print_titles": ws.print_title_rows
+            "print_titles": ws.print_title_rows,
+            "new_rows_count": len(new_rows_list),
+            "new_rows": new_rows_list
         }
 
         return report
 
     @classmethod
-    def validate_file_from_ws(cls, ws, filename="Workbook"):
+    def validate_file_from_ws(cls, ws, filename="Workbook", template_ws=None, template_apartments=None):
         """Автономная валидация переданного worksheet с возвратом детального отчета."""
         report = ValidationReport(filename=filename)
         landmarks = cls.find_table_landmarks(ws)
         tot_cols = landmarks["total_cols"]
         itogo_r = landmarks["itogo_row"]
         sig_r = landmarks["sig_row"]
+        data_start_r = landmarks["data_start_row"]
 
-        # Проверка шрифтов и рамок
-        for r in range(6, (itogo_r or ws.max_row) + 1):
+        tpl_apts = set()
+        tpl_apt_keys = set()
+        if template_apartments:
+            tpl_apts = {re.sub(r'\s+', ' ', str(a).strip().lower()) for a in template_apartments if a}
+            tpl_apt_keys = {cls.canonical_apartment_key(a) for a in template_apartments if a}
+        elif template_ws:
+            try:
+                if isinstance(template_ws, str) and os.path.exists(template_ws):
+                    twb = openpyxl.load_workbook(template_ws, data_only=True)
+                    tws = twb.active
+                elif hasattr(template_ws, 'active'):
+                    tws = template_ws.active
+                else:
+                    tws = template_ws
+
+                t_landmarks = cls.find_table_landmarks(tws)
+                t_data_start = t_landmarks["data_start_row"]
+                t_itogo = t_landmarks["itogo_row"]
+                end_tr = t_itogo if t_itogo else (tws.max_row + 1)
+                for tr in range(t_data_start, end_tr):
+                    t_val = str(tws.cell(row=tr, column=1).value or '').strip()
+                    if t_val and not any(k in t_val.lower() for k in ['итого', 'всего', 'закрытые', 'замененные', 'директор', 'подпись', 'реестр']):
+                        tpl_apts.add(re.sub(r'\s+', ' ', t_val.lower()))
+                        ck = cls.canonical_apartment_key(t_val)
+                        if ck:
+                            tpl_apt_keys.add(ck)
+            except Exception:
+                pass
+
+        # Проверка строк таблицы, шрифтов, новых строк и рамок
+        end_data_r = itogo_r if itogo_r else ws.max_row
+        for r in range(data_start_r, end_data_r + 1):
+            val1 = str(ws.cell(row=r, column=1).value or '').strip()
+            norm_val1 = re.sub(r'\s+', ' ', val1.lower())
+            val1_canon = cls.canonical_apartment_key(val1)
+
+            is_new = False
+            if val1 and not any(k in norm_val1 for k in ['итого', 'всего', 'закрытые', 'замененные']):
+                if tpl_apt_keys:
+                    if val1_canon not in tpl_apt_keys:
+                        is_new = True
+                elif tpl_apts:
+                    if norm_val1 not in tpl_apts:
+                        is_new = True
+
+            if not is_new and val1 and not any(k in norm_val1 for k in ['итого', 'всего', 'закрытые', 'замененные']):
+                c1_cell = ws.cell(row=r, column=1)
+                if c1_cell.font and c1_cell.font.color:
+                    c_rgb = str(getattr(c1_cell.font.color, 'rgb', '')).upper()
+                    if c_rgb in ("FFFF0000", "FF0000", "00FF0000", "RED"):
+                        is_new = True
+
+            if is_new:
+                report.add_issue("new_row", f"R{r} ({val1})", f"Строка «{val1}» отсутствовала в шаблоне (новая из Аркуса/калькулятора)", severity="INFO")
+            elif val1 and not any(k in norm_val1 for k in ['итого', 'всего', 'закрытые', 'замененные']):
+                # Проверка отдельных новых счетчиков, выделенных красным шрифтом
+                for c_chk in range(2, tot_cols + 1, 3):
+                    chk_cells = [ws.cell(row=r, column=c_chk + offset) for offset in range(3) if c_chk + offset <= tot_cols]
+                    if any(mc.font and mc.font.color and str(getattr(mc.font.color, 'rgb', '')).upper() in ("FFFF0000", "FF0000", "00FF0000", "RED") for mc in chk_cells):
+                        col_letter = get_column_letter(c_chk)
+                        report.add_issue("new_meter", f"R{r}C{c_chk} ({val1})", f"Новые показания счетчика (колонка {col_letter}) для «{val1}» — выделены красным шрифтом", severity="INFO")
+
             for c in range(1, tot_cols + 1):
                 cell = ws.cell(row=r, column=c)
                 if cell.font and cell.font.name not in (cls.DEFAULT_FONT_NAME, "Arial", "Calibri"):
@@ -378,9 +529,9 @@ class ExcelFormatValidator:
         return report
 
     @classmethod
-    def validate_file(cls, filepath):
+    def validate_file(cls, filepath, template_path=None):
         """Автономная валидация любого xlsx файла с возвратом детального отчета."""
         wb = openpyxl.load_workbook(filepath, data_only=False)
         ws = wb.active
-        return cls.validate_file_from_ws(ws, filename=os.path.basename(filepath))
+        return cls.validate_file_from_ws(ws, filename=os.path.basename(filepath), template_ws=template_path)
 

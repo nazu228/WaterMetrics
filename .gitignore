@@ -22,6 +22,8 @@ test_results/
 .watermetrics/
 *.bak
 *.tmp
+/Южный город/
+Теплосеть расчет оплаты*.xlsx
 
 # IDEs
 .vscode/

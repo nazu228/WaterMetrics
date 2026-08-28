@@ -27,7 +27,9 @@ class ToastNotification(QWidget):
         container = QFrame()
         container.setObjectName("toastContainer")
 
-        theme_accent = ThemeManager.get_current_accent_color()
+        curr_theme = ThemeManager.get_current_theme_name()
+        is_light = curr_theme in ("Pearl Light", "Как дома")
+        theme_accent = ThemeManager.get_current_accent_color(curr_theme)
         color_map = {
             "INFO": (theme_accent, "ℹ️"),
             "SUCCESS": ("#10B981", "✅"),
@@ -35,11 +37,24 @@ class ToastNotification(QWidget):
         }
         accent_color, icon_symbol = color_map.get(level.upper(), (theme_accent, "ℹ️"))
 
+        if is_light:
+            bg_col = "rgba(255, 255, 255, 0.96)" if curr_theme == "Как дома" else "rgba(248, 250, 252, 0.95)"
+            border_col = "rgba(10, 36, 106, 0.35)" if curr_theme == "Как дома" else "rgba(2, 128, 144, 0.35)"
+            text_col = "#000000" if curr_theme == "Как дома" else "#0F172A"
+            badge_bg = "rgba(10, 36, 106, 0.08)" if curr_theme == "Как дома" else "rgba(2, 128, 144, 0.10)"
+            badge_border = "rgba(10, 36, 106, 0.20)" if curr_theme == "Как дома" else "rgba(2, 128, 144, 0.25)"
+        else:
+            bg_col = "rgba(18, 24, 38, 0.82)"
+            border_col = "rgba(255, 255, 255, 0.15)"
+            text_col = "#F8FAFC"
+            badge_bg = "rgba(255, 255, 255, 0.08)"
+            badge_border = "rgba(255, 255, 255, 0.18)"
+
         # Apple Frosted Glass стилизация плашки с верхним бликом Specular Edge
         container.setStyleSheet(f"""
             QFrame#toastContainer {{
-                background-color: rgba(18, 24, 38, 0.82);
-                border: 1px solid rgba(255, 255, 255, 0.15);
+                background-color: {bg_col};
+                border: 1px solid {border_col};
                 border-top: 1px solid rgba(255, 255, 255, 0.35);
                 border-radius: 18px;
             }}
@@ -55,8 +70,8 @@ class ToastNotification(QWidget):
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         badge.setStyleSheet(f"""
             QLabel {{
-                background-color: rgba(255, 255, 255, 0.08);
-                border: 1px solid rgba(255, 255, 255, 0.18);
+                background-color: {badge_bg};
+                border: 1px solid {badge_border};
                 border-top: 1px solid rgba(255, 255, 255, 0.35);
                 border-radius: 13px;
                 color: {accent_color};
@@ -67,7 +82,7 @@ class ToastNotification(QWidget):
 
         lbl = QLabel(message)
         lbl.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        lbl.setStyleSheet("color: #F8FAFC; background: transparent;")
+        lbl.setStyleSheet(f"color: {text_col}; background: transparent;")
 
         c_layout.addWidget(badge)
         c_layout.addWidget(lbl)

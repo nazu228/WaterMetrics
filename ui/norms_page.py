@@ -57,12 +57,16 @@ class NormsPage(QWidget):
         grid.addWidget(QLabel("Норматив ХВС (м³/чел):", objectName="FieldLabel"), 2, 0)
         self.txt_norm_cold = QLineEdit(str(saved_cold))
         self.txt_norm_cold.setMaximumWidth(140)
+        self.txt_norm_cold.setMinimumHeight(36)
+        self.txt_norm_cold.setStyleSheet("font-size: 14px; font-weight: bold; padding: 4px 8px;")
         self.txt_norm_cold.setPlaceholderText("4.04")
         grid.addWidget(self.txt_norm_cold, 2, 1)
 
         grid.addWidget(QLabel("Норматив ГВС (м³/чел):", objectName="FieldLabel"), 3, 0)
         self.txt_norm_hot = QLineEdit(str(saved_hot))
         self.txt_norm_hot.setMaximumWidth(140)
+        self.txt_norm_hot.setMinimumHeight(36)
+        self.txt_norm_hot.setStyleSheet("font-size: 14px; font-weight: bold; padding: 4px 8px;")
         self.txt_norm_hot.setPlaceholderText("2.65")
         grid.addWidget(self.txt_norm_hot, 3, 1)
 
@@ -71,12 +75,14 @@ class NormsPage(QWidget):
 
         btn_save = QPushButton("  Сохранить", objectName="PrimaryButton")
         btn_save.setIcon(get_svg_icon("save", color="#020617"))
-        btn_save.setMinimumHeight(36)
+        btn_save.setMinimumHeight(38)
+        btn_save.setStyleSheet("font-size: 13.5px; font-weight: 800;")
         btn_save.clicked.connect(self._save_norms)
         btn_row.addWidget(btn_save, 2)
 
         btn_reset = QPushButton("Сброс", objectName="SecondaryButton")
-        btn_reset.setMinimumHeight(36)
+        btn_reset.setMinimumHeight(38)
+        btn_reset.setStyleSheet("font-size: 13px; font-weight: 600;")
         btn_reset.setToolTip("Сбросить к заводским нормативам (ХВС: 4.04, ГВС: 2.65)")
         btn_reset.clicked.connect(self._reset_norms)
         btn_row.addWidget(btn_reset, 1)
@@ -105,8 +111,8 @@ class NormsPage(QWidget):
         for head_str, text_str in laws:
             box = QFrame()
             b_lay = QVBoxLayout(box)
-            b_lay.setContentsMargins(8, 6, 8, 6)
-            b_lay.setSpacing(2)
+            b_lay.setContentsMargins(10, 8, 10, 8)
+            b_lay.setSpacing(4)
 
             lh = QLabel(head_str)
             lt = QLabel(text_str)
@@ -140,18 +146,18 @@ class NormsPage(QWidget):
         accent = ThemeManager.get_current_accent_color()
 
         head_color = ("#0A246A" if curr_theme == "Как дома" else "#028090") if is_light else accent
-        sub_color = "#475569" if is_light else "#94A3B8"
-        box_bg = "rgba(10, 36, 106, 0.04)" if curr_theme == "Как дома" else ("rgba(2, 128, 144, 0.06)" if curr_theme == "Pearl Light" else "rgba(255, 255, 255, 0.03)")
-        box_border = "#7F9DB9" if curr_theme == "Как дома" else ("rgba(2, 128, 144, 0.25)" if curr_theme == "Pearl Light" else "rgba(255, 255, 255, 0.08)")
+        sub_color = "#334155" if is_light else "#E2E8F0"
+        box_bg = "rgba(10, 36, 106, 0.04)" if curr_theme == "Как дома" else ("rgba(2, 128, 144, 0.06)" if curr_theme == "Pearl Light" else "rgba(255, 255, 255, 0.04)")
+        box_border = "#7F9DB9" if curr_theme == "Как дома" else ("rgba(2, 128, 144, 0.25)" if curr_theme == "Pearl Light" else "rgba(255, 255, 255, 0.12)")
 
         if hasattr(self, 'desc_label'):
-            self.desc_label.setStyleSheet(f"color: {sub_color}; font-size: 12px; line-height: 1.4;")
+            self.desc_label.setStyleSheet(f"color: {sub_color}; font-size: 13.5px; line-height: 1.45;")
 
         if hasattr(self, 'law_widgets'):
             for box, lh, lt in self.law_widgets:
-                box.setStyleSheet(f"background: {box_bg}; border: 1px solid {box_border}; border-radius: 8px; padding: 6px 10px;")
-                lh.setStyleSheet(f"color: {head_color}; font-weight: bold; font-size: 12px;")
-                lt.setStyleSheet(f"color: {sub_color}; font-size: 11px;")
+                box.setStyleSheet(f"background: {box_bg}; border: 1.5px solid {box_border}; border-radius: 8px; padding: 8px 12px;")
+                lh.setStyleSheet(f"color: {head_color}; font-weight: bold; font-size: 13.5px;")
+                lt.setStyleSheet(f"color: {sub_color}; font-size: 13px; line-height: 1.4;")
 
     def _save_norms(self):
         try:

@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QWidget, QFrame, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QSizePolicy, QApplication, QBoxLayout, QMenu,
-    QDialog, QFileDialog, QSystemTrayIcon
+    QDialog, QFileDialog, QSystemTrayIcon, QComboBox
 )
 from PySide6.QtCore import (
     Qt, QTimer, QPoint, QRect, QSize, Signal, Slot, QPropertyAnimation,
@@ -91,7 +91,7 @@ class EdgeCompanionWindow(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setMouseTracking(True)
 
-        self.card_width = 360
+        self.card_width = 380
         self.parked_peek = 16
         self.is_hovered = False
         self.is_dock_expanded = False
@@ -108,6 +108,20 @@ class EdgeCompanionWindow(QFrame):
         self.root_layout.setContentsMargins(12, 10, 12, 10)
         self.root_layout.setSpacing(8)
 
+    def sizeHint(self) -> QSize:
+        if self.root_layout:
+            return QSize(self.card_width, self.root_layout.sizeHint().height())
+        return super().sizeHint()
+
+    def minimumSizeHint(self) -> QSize:
+        if self.root_layout:
+            return QSize(self.card_width, self.root_layout.minimumSize().height())
+        return super().minimumSizeHint()
+
+    def request_relayout(self, animate: bool = True):
+        if self.manager:
+            self.manager.relayout_dock(animate=animate)
+
     def set_flight_locked(self, locked: bool):
         """Включает/выключает блокировку взаимодействия во время движения."""
         self.is_flight_locked = locked
@@ -119,34 +133,70 @@ class EdgeCompanionWindow(QFrame):
             self.setCursor(Qt.CursorShape.ArrowCursor)
         self.update()
 
+    def update_theme_assets(self, theme_name: str = None):
+        self._current_theme_name = theme_name or ThemeManager.get_current_theme_name()
+        self.update()
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         rect = self.rect().adjusted(1, 1, -1, -1)
-        theme_name = ThemeManager.get_current_theme_name()
-        accent = ThemeManager.get_current_accent_color()
-        is_light = theme_name in ("Pearl Light", "Как дома")
-
-        path = QPainterPath()
-        path.addRoundedRect(rect, 10, 10)
-
-        # При наведении или перетаскивании карточка «приближается» — фон становится глубже, свечение ярче
+        theme_name = getattr(self, '_current_theme_name', None) or ThemeManager.get_current_theme_name()
         active = (self.is_hovered or self.is_dragging) and not self.is_flight_locked
-        if is_light:
-            grad = QLinearGradient(0, 0, 0, rect.height())
-            grad.setColorAt(0.0, QColor(255, 255, 255, 255))
-            grad.setColorAt(1.0, QColor(241, 245, 249, 255 if active else 250))
-            border_color = QColor(accent)
-            border_color.setAlpha(255 if active else 200)
-            glow_pen = QPen(border_color, 2.2 if active else 1.4)
-        else:
-            grad = QLinearGradient(0, 0, 0, rect.height())
-            grad.setColorAt(0.0, QColor(18, 28, 50, 255) if active else QColor(15, 23, 42, 252))
-            grad.setColorAt(1.0, QColor(35, 48, 70, 255) if active else QColor(30, 41, 59, 252))
-            border_color = QColor(accent)
-            border_color.setAlpha(255 if active else 190)
-            glow_pen = QPen(border_color, 2.4 if active else 1.4)
+
+        card_palettes = {
+            "Dark Tech Azure": {
+                "top": QColor(11, 23, 54, 255 if active else 245),
+                "bot": QColor(7, 16, 38, 255 if active else 245),
+                "border": QColor(0, 242, 254, 255 if active else 190),
+                "border_width": 2.2 if active else 1.4,
+                "radius": 10
+            },
+            "Pearl Light": {
+                "top": QColor(255, 255, 255, 255),
+                "bot": QColor(241, 245, 249, 255 if active else 250),
+                "border": QColor(2, 128, 144, 255 if active else 200),
+                "border_width": 2.2 if active else 1.4,
+                "radius": 10
+            },
+            "Cyberpunk Neon": {
+                "top": QColor(36, 5, 54, 255 if active else 245),
+                "bot": QColor(22, 2, 36, 255 if active else 245),
+                "border": QColor(255, 0, 127, 255 if active else 190),
+                "border_width": 2.2 if active else 1.4,
+                "radius": 10
+            },
+            "Emerald Cyber": {
+                "top": QColor(6, 38, 24, 255 if active else 245),
+                "bot": QColor(2, 20, 12, 255 if active else 245),
+                "border": QColor(16, 185, 129, 255 if active else 190),
+                "border_width": 2.2 if active else 1.4,
+                "radius": 10
+            },
+            "Deep Violet Glass": {
+                "top": QColor(24, 10, 56, 255 if active else 245),
+                "bot": QColor(15, 5, 36, 255 if active else 245),
+                "border": QColor(168, 85, 247, 255 if active else 190),
+                "border_width": 2.2 if active else 1.4,
+                "radius": 10
+            },
+            "Как дома": {
+                "top": QColor(236, 233, 216, 255),
+                "bot": QColor(236, 233, 216, 255),
+                "border": QColor(127, 157, 185, 255),
+                "border_width": 1.5,
+                "radius": 4
+            }
+        }
+        pal = card_palettes.get(theme_name, card_palettes["Dark Tech Azure"])
+        path = QPainterPath()
+        path.addRoundedRect(rect, pal["radius"], pal["radius"])
+
+        grad = QLinearGradient(0, 0, 0, rect.height())
+        grad.setColorAt(0.0, pal["top"])
+        grad.setColorAt(1.0, pal["bot"])
+        glow_pen = QPen(pal["border"], pal["border_width"])
 
         painter.setPen(glow_pen)
         painter.setBrush(QBrush(grad))
@@ -345,56 +395,110 @@ class CompanionMiniFloater(QFrame):
         lay.setContentsMargins(10, 4, 10, 4)
         lay.setSpacing(8)
 
-        accent = ThemeManager.get_current_accent_color()
+        t_name = ThemeManager.get_current_theme_name()
+        accent = ThemeManager.get_current_accent_color(t_name)
+        is_light = t_name in ("Pearl Light", "Как дома")
+
         self.icon_badge = GlassIconWidget("droplet", color=accent, size=QSize(22, 22))
         lay.addWidget(self.icon_badge)
 
         self.lbl_text = QLabel("⚡ WaterMetrics: Набивка")
-        self.lbl_text.setStyleSheet("font-size: 11px; font-weight: bold; color: #F8FAFC; background: transparent;")
+        txt_col = "#0A246A" if t_name == "Как дома" else ("#0F172A" if is_light else "#F8FAFC")
+        self.lbl_text.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {txt_col}; background: transparent;")
         lay.addWidget(self.lbl_text, 1)
 
         self.btn_expand = QPushButton("◨ Развернуть")
-        self.btn_expand.setStyleSheet(f"""
-            QPushButton {{
-                background: rgba(255, 255, 255, 0.12);
-                color: {accent};
-                border: 1px solid rgba(255, 255, 255, 0.20);
-                border-radius: 8px;
-                font-size: 11px;
-                font-weight: 600;
-                padding: 4px 8px;
-            }}
-            QPushButton:hover {{
-                background: {accent};
-                color: #020617;
-                border: 1px solid {accent};
-            }}
-        """)
         self.btn_expand.clicked.connect(self.restore_requested.emit)
         lay.addWidget(self.btn_expand)
+        self.update_theme_assets(t_name)
+
+    def update_theme_assets(self, theme_name: str = None):
+        self._current_theme_name = theme_name or ThemeManager.get_current_theme_name()
+        t_name = self._current_theme_name
+        accent = ThemeManager.get_current_accent_color(t_name)
+        is_light = t_name in ("Pearl Light", "Как дома")
+
+        txt_col = "#0A246A" if t_name == "Как дома" else ("#0F172A" if is_light else "#F8FAFC")
+        if hasattr(self, 'lbl_text'):
+            self.lbl_text.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {txt_col}; background: transparent;")
+        if hasattr(self, 'icon_badge'):
+            self.icon_badge.set_color(accent)
+
+        if hasattr(self, 'btn_expand'):
+            if t_name == "Как дома":
+                self.btn_expand.setStyleSheet("""
+                    QPushButton {
+                        background: #ECE9D8;
+                        color: #000000;
+                        border: 1px solid #7F9DB9;
+                        border-radius: 3px;
+                        font-size: 11px;
+                        font-weight: 700;
+                        padding: 3px 6px;
+                    }
+                    QPushButton:hover {
+                        background: #DFDBC8;
+                    }
+                """)
+            elif is_light:
+                self.btn_expand.setStyleSheet("""
+                    QPushButton {
+                        background: #E2E8F0;
+                        color: #028090;
+                        border: 1px solid #CBD5E1;
+                        border-radius: 6px;
+                        font-size: 11px;
+                        font-weight: 700;
+                        padding: 4px 8px;
+                    }
+                    QPushButton:hover {
+                        background: #028090;
+                        color: #FFFFFF;
+                    }
+                """)
+            else:
+                self.btn_expand.setStyleSheet(f"""
+                    QPushButton {{
+                        background: rgba(255, 255, 255, 0.12);
+                        color: {accent};
+                        border: 1px solid rgba(255, 255, 255, 0.20);
+                        border-radius: 6px;
+                        font-size: 11px;
+                        font-weight: 600;
+                        padding: 4px 8px;
+                    }}
+                    QPushButton:hover {{
+                        background: {accent};
+                        color: #020617;
+                        border: 1px solid {accent};
+                    }}
+                """)
+        self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         rect = self.rect().adjusted(1, 1, -1, -1)
-        accent = ThemeManager.get_current_accent_color()
-        curr_theme = ThemeManager.get_current_theme_name()
-        is_light = curr_theme in ("Pearl Light", "Как дома")
+        theme_name = getattr(self, '_current_theme_name', None) or ThemeManager.get_current_theme_name()
+        
+        floater_palettes = {
+            "Dark Tech Azure": (QColor(11, 23, 54, 245), QColor(7, 16, 38, 245), QColor(0, 242, 254, 220), 10),
+            "Pearl Light": (QColor(255, 255, 255, 250), QColor(241, 245, 249, 250), QColor(2, 128, 144, 220), 10),
+            "Cyberpunk Neon": (QColor(36, 5, 54, 245), QColor(22, 2, 36, 245), QColor(255, 0, 127, 220), 10),
+            "Emerald Cyber": (QColor(6, 38, 24, 245), QColor(2, 20, 12, 245), QColor(16, 185, 129, 220), 10),
+            "Deep Violet Glass": (QColor(24, 10, 56, 245), QColor(15, 5, 36, 245), QColor(168, 85, 247, 220), 10),
+            "Как дома": (QColor(236, 233, 216, 255), QColor(236, 233, 216, 255), QColor(127, 157, 185, 255), 4)
+        }
+        top_col, bot_col, border_col, rad = floater_palettes.get(theme_name, floater_palettes["Dark Tech Azure"])
 
         path = QPainterPath()
-        path.addRoundedRect(rect, 14, 14)
+        path.addRoundedRect(rect, rad, rad)
 
-        if is_light:
-            grad = QLinearGradient(0, 0, 0, rect.height())
-            grad.setColorAt(0.0, QColor(255, 255, 255, 245))
-            grad.setColorAt(1.0, QColor(241, 245, 249, 245))
-            border_pen = QPen(QColor(accent), 1.5)
-        else:
-            grad = QLinearGradient(0, 0, 0, rect.height())
-            grad.setColorAt(0.0, QColor(15, 23, 42, 240))
-            grad.setColorAt(1.0, QColor(10, 16, 30, 245))
-            border_pen = QPen(QColor(accent), 1.5)
+        grad = QLinearGradient(0, 0, 0, rect.height())
+        grad.setColorAt(0.0, top_col)
+        grad.setColorAt(1.0, bot_col)
+        border_pen = QPen(border_col, 1.5)
 
         painter.setPen(border_pen)
         painter.setBrush(QBrush(grad))
@@ -430,21 +534,21 @@ class CompanionTopSettingsBar(EdgeCompanionWindow):
         row1.setContentsMargins(0, 0, 0, 0)
         row1.setSpacing(6)
 
-        self.lbl_title = QLabel("⚡ Режим набивки", objectName="FieldLabel")
+        self.lbl_title = QLabel("⚡ Режим набивки", objectName="CompanionTopTitle")
         accent = ThemeManager.get_current_accent_color()
-        self.lbl_title.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {accent};")
+        self.lbl_title.setStyleSheet(f"font-size: 13.5px; font-weight: 800; color: {accent} !important;")
         self.lbl_title.setToolTip("Режим набивки WaterMetrics (F11 / Ctrl+D). Карточки можно перетаскивать по порядку.")
 
         self.btn_pin = QPushButton(" Закрепить", objectName="SecondaryButton")
         self.btn_pin.setIcon(get_svg_icon("unpin", color="#94A3B8"))
-        self.btn_pin.setMinimumHeight(26)
+        self.btn_pin.setMinimumHeight(30)
         self.btn_pin.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_pin.setToolTip("Закрепить панели на экране (не уезжать за край)")
         self.btn_pin.clicked.connect(self.pin_toggled.emit)
 
         self.btn_min = QPushButton(" В трей", objectName="SecondaryButton")
         self.btn_min.setIcon(get_svg_icon("tray", color="#94A3B8"))
-        self.btn_min.setMinimumHeight(26)
+        self.btn_min.setMinimumHeight(30)
         self.btn_min.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_min.setToolTip("Свернуть все панели в системный трей (область уведомлений)")
         self.btn_min.clicked.connect(self.minimize_requested.emit)
@@ -461,14 +565,14 @@ class CompanionTopSettingsBar(EdgeCompanionWindow):
 
         self.btn_side = QPushButton("⇄ Слева", objectName="SecondaryButton")
         self.btn_side.setIcon(get_svg_icon("toggle", color="#94A3B8"))
-        self.btn_side.setMinimumHeight(28)
+        self.btn_side.setMinimumHeight(32)
         self.btn_side.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_side.setToolTip("Переместить весь стек на противоположный край экрана (Слева / Справа)")
         self.btn_side.clicked.connect(self.switch_side_requested.emit)
 
         self.btn_restore = QPushButton("⮌ Вернуться в окно", objectName="AccentButton")
         self.btn_restore.setIcon(get_svg_icon("window_restore", color="#020617"))
-        self.btn_restore.setMinimumHeight(28)
+        self.btn_restore.setMinimumHeight(32)
         self.btn_restore.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_restore.setToolTip("Вернуться в главное окно программы (F11 / Ctrl+D / Esc)")
         self.btn_restore.clicked.connect(self.restore_requested.emit)
@@ -478,49 +582,181 @@ class CompanionTopSettingsBar(EdgeCompanionWindow):
 
         self.root_layout.addLayout(row1)
         self.root_layout.addLayout(row2)
+        self.update_theme_assets()
 
     def update_pin_state(self, is_pinned: bool):
         accent = ThemeManager.get_current_accent_color()
+        t_name = ThemeManager.get_current_theme_name()
+        is_light = t_name in ("Pearl Light", "Как дома")
         if is_pinned:
             self.btn_pin.setText(" Закреплено")
-            self.btn_pin.setIcon(get_svg_icon("pin", color=accent))
+            self.btn_pin.setIcon(get_svg_icon("pin", color=accent if not is_light else "#0A246A"))
             self.btn_pin.setStyleSheet(f"""
                 QPushButton {{
-                    background: rgba(0, 242, 254, 0.25) !important;
+                    background: {accent} !important;
                     border: 1.5px solid {accent} !important;
-                    color: {accent} !important;
+                    color: {'#000000' if not is_light else '#FFFFFF'} !important;
                     border-radius: 6px;
-                    font-size: 11px;
-                    font-weight: 600;
-                    padding: 3px 8px;
+                    font-size: 12px;
+                    font-weight: 800;
+                    padding: 4px 10px;
                 }}
             """)
             self.btn_pin.setToolTip("Панели закреплены на экране (кликните, чтобы включить автоскрытие)")
         else:
             self.btn_pin.setText(" Закрепить")
-            self.btn_pin.setIcon(get_svg_icon("unpin", color="#94A3B8"))
-            self.btn_pin.setStyleSheet("""
+            self.btn_pin.setIcon(get_svg_icon("unpin", color="#0F172A" if is_light else "#FFFFFF"))
+            if is_light:
+                self.btn_pin.setStyleSheet("""
+                    QPushButton {
+                        background: #E2E8F0;
+                        border: 1px solid #CBD5E1;
+                        border-radius: 6px;
+                        color: #0F172A;
+                        font-size: 12px;
+                        font-weight: 700;
+                        padding: 4px 10px;
+                    }
+                    QPushButton:hover {
+                        background: #CBD5E1;
+                    }
+                """)
+            else:
+                self.btn_pin.setStyleSheet("""
+                    QPushButton {
+                        background: rgba(255, 255, 255, 0.12);
+                        border: 1px solid rgba(255, 255, 255, 0.25);
+                        border-radius: 6px;
+                        color: #FFFFFF;
+                        font-size: 12px;
+                        font-weight: 700;
+                        padding: 4px 10px;
+                    }
+                    QPushButton:hover {
+                        background: rgba(255, 255, 255, 0.22);
+                        color: #FFFFFF;
+                    }
+                """)
+            self.btn_pin.setToolTip("Закрепить панели на экране (не уезжать за край)")
+
+    def update_theme_assets(self, theme_name: str = None):
+        super().update_theme_assets(theme_name)
+        t_name = self._current_theme_name
+        accent = ThemeManager.get_current_accent_color(t_name)
+        is_light = t_name in ("Pearl Light", "Как дома")
+
+        c_title = "#0A246A" if t_name == "Как дома" else ("#028090" if is_light else ("#D8B4FE" if t_name == "Deep Violet Glass" else accent))
+        self.lbl_title.setStyleSheet(f"font-size: 13.5px; font-weight: 800; color: {c_title} !important; background: transparent;")
+
+        if t_name == "Как дома":
+            sec_style = """
                 QPushButton {
-                    background: rgba(255, 255, 255, 0.06);
-                    border: 1px solid rgba(255, 255, 255, 0.12);
-                    border-radius: 6px;
-                    color: #94A3B8;
-                    font-size: 11px;
-                    padding: 3px 8px;
+                    background: #ECE9D8;
+                    border: 1px solid #7F9DB9;
+                    border-radius: 3px;
+                    color: #000000;
+                    font-size: 11.5px;
+                    font-weight: 700;
+                    padding: 4px 8px;
                 }
                 QPushButton:hover {
-                    background: rgba(255, 255, 255, 0.15);
-                    border: 1px solid rgba(255, 255, 255, 0.25);
-                    color: #FFFFFF;
+                    background: #DFDBC8;
                 }
-            """)
-            self.btn_pin.setToolTip("Закрепить панели на экране (не уезжать за край)")
+            """
+            acc_style = """
+                QPushButton {
+                    background: #0A246A;
+                    border: 1px solid #000000;
+                    border-radius: 3px;
+                    color: #FFFFFF;
+                    font-size: 11.5px;
+                    font-weight: 800;
+                    padding: 4px 8px;
+                }
+                QPushButton:hover {
+                    background: #005A9E;
+                }
+            """
+        elif is_light:
+            sec_style = """
+                QPushButton {
+                    background: #E2E8F0;
+                    border: 1px solid #CBD5E1;
+                    border-radius: 6px;
+                    color: #0F172A;
+                    font-size: 12px;
+                    font-weight: 700;
+                    padding: 4px 10px;
+                }
+                QPushButton:hover {
+                    background: #CBD5E1;
+                    color: #000000;
+                }
+            """
+            acc_style = """
+                QPushButton {
+                    background: #028090;
+                    border: 1px solid #028090;
+                    border-radius: 6px;
+                    color: #FFFFFF;
+                    font-size: 12px;
+                    font-weight: 800;
+                    padding: 4px 10px;
+                }
+                QPushButton:hover {
+                    background: #00A896;
+                }
+            """
+        else:
+            sec_style = f"""
+                QPushButton {{
+                    background: rgba(255, 255, 255, 0.12);
+                    border: 1px solid rgba(255, 255, 255, 0.25);
+                    border-radius: 6px;
+                    color: #FFFFFF;
+                    font-size: 12px;
+                    font-weight: 700;
+                    padding: 4px 10px;
+                }}
+                QPushButton:hover {{
+                    background: rgba(255, 255, 255, 0.22);
+                    border-color: {accent};
+                    color: #FFFFFF;
+                }}
+            """
+            acc_style = f"""
+                QPushButton {{
+                    background: {accent};
+                    border: 1px solid {accent};
+                    border-radius: 6px;
+                    color: #000000;
+                    font-size: 12px;
+                    font-weight: 800;
+                    padding: 4px 10px;
+                }}
+                QPushButton:hover {{
+                    background: #FFFFFF;
+                }}
+            """
+
+        self.btn_side.setStyleSheet(sec_style)
+        self.btn_side.setIcon(get_svg_icon("toggle", color="#0F172A" if is_light else "#FFFFFF"))
+        self.btn_min.setStyleSheet(sec_style)
+        self.btn_min.setIcon(get_svg_icon("tray", color="#0F172A" if is_light else "#FFFFFF"))
+        self.btn_restore.setStyleSheet(acc_style)
+        self.btn_restore.setIcon(get_svg_icon("window_restore", color="#FFFFFF" if is_light else "#000000"))
+        self.update_pin_state(self.manager.is_pinned if self.manager else False)
+        self.update()
+
+
+from services.folder_service import FolderNavigationService
+from ui.dialogs.file_guard_dialog import FileGuardDialog
 
 
 # ─── 1. АУТЕНТИЧНАЯ КАРТОЧКА ФАЙЛОВ ─────────────────────────────────────────────
 
 class AuthenticFilesWindow(EdgeCompanionWindow):
-    """Карточка файлов: Шаблон, Аркус, Сохранение, Мастер замен с полным сохранением функций."""
+    """Карточка файлов: Шаблон, Аркус, Сохранение, Мастер замен и Умный навигатор по месяцам."""
     template_changed = Signal(str)
     arcus_changed = Signal(str)
     save_path_changed = Signal(str)
@@ -531,6 +767,7 @@ class AuthenticFilesWindow(EdgeCompanionWindow):
         self.tpl_path = ""
         self.arc_path = ""
         self.save_path = ""
+        self.folder_ctx = {}
         self.excel_manager = ExcelManager()
         self.init_ui()
 
@@ -539,53 +776,99 @@ class AuthenticFilesWindow(EdgeCompanionWindow):
         self.root_layout.setSpacing(6)
 
         hdr_row = QHBoxLayout()
-        hdr_row.setSpacing(4)
-        self.lbl_hdr = QLabel("⋮⋮  📁 Файлы и настройки", objectName="FieldLabel")
-        self.lbl_hdr.setStyleSheet("font-size: 11px; font-weight: bold; color: #94A3B8;")
+        hdr_row.setSpacing(6)
+        self.lbl_hdr = QLabel("⋮⋮ 📁 Файлы", objectName="CompanionFilesHdr")
+        self.lbl_hdr.setFixedHeight(22)
         hdr_row.addWidget(self.lbl_hdr)
         hdr_row.addStretch()
         self.root_layout.addLayout(hdr_row)
 
-        self.drop_box = QBoxLayout(QBoxLayout.Direction.TopToBottom)
+        # ─── Умная плашка контекста дома и месяца ───
+        self.smart_nav_frame = QFrame()
+        self.smart_nav_frame.setObjectName("SmartNavFrame")
+        self.smart_nav_frame.setVisible(False)
+        nav_lay = QVBoxLayout(self.smart_nav_frame)
+        nav_lay.setContentsMargins(8, 6, 8, 6)
+        nav_lay.setSpacing(5)
+
+        # Строка 1: Текст контекста (на всю ширину, аккуратно)
+        self.lbl_smart_context = QLabel("", objectName="CompanionSmartContext")
+        self.lbl_smart_context.setWordWrap(True)
+        nav_lay.addWidget(self.lbl_smart_context)
+
+        # Строка 2: Переключатель дома (на всю ширину строки)
+        self.house_row = QHBoxLayout()
+        self.house_row.setContentsMargins(0, 0, 0, 0)
+        self.house_row.setSpacing(6)
+        self.lbl_switch_house = QLabel("Дом:", objectName="CompanionHouseLbl")
+        self.combo_houses = QComboBox()
+        self.combo_houses.setFixedHeight(26)
+        self.combo_houses.currentIndexChanged.connect(self._on_house_combo_changed)
+        self.house_row.addWidget(self.lbl_switch_house)
+        self.house_row.addWidget(self.combo_houses, 1)
+        nav_lay.addLayout(self.house_row)
+
+        # Строка 3: Кнопка мгновенного подключения Аркуса на ОТДЕЛЬНОЙ строке на всю ширину
+        self.btn_auto_arcus = QPushButton("⚡ Подключить найденный Аркус")
+        self.btn_auto_arcus.setIcon(get_svg_icon("sparkles", color="#00F2FE"))
+        self.btn_auto_arcus.setFixedHeight(28)
+        self.btn_auto_arcus.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_auto_arcus.setVisible(False)
+        self.btn_auto_arcus.clicked.connect(self._on_auto_arcus_clicked)
+        nav_lay.addWidget(self.btn_auto_arcus)
+
+        # Строка 4: Предупреждение о наличии готового отчета
+        self.lbl_exist_alert = QLabel("")
+        self.lbl_exist_alert.setWordWrap(True)
+        self.lbl_exist_alert.setStyleSheet("""
+            color: #FBBF24;
+            font-size: 11px;
+            font-weight: 700;
+            background: rgba(245, 158, 11, 0.12);
+            border: 1px solid rgba(245, 158, 11, 0.30);
+            border-radius: 4px;
+            padding: 3px 6px;
+        """)
+        self.lbl_exist_alert.setVisible(False)
+        nav_lay.addWidget(self.lbl_exist_alert)
+
+        self.root_layout.addWidget(self.smart_nav_frame)
+
+        # ─── Дроп-зоны Шаблона и Аркуса в одну строку ───
+        self.drop_box = QHBoxLayout()
+        self.drop_box.setContentsMargins(0, 0, 0, 0)
         self.drop_box.setSpacing(6)
 
-        self.drop_tpl = ExcelDropZone("Файл Шаблона", "Перетащите файл шаблона")
+        self.drop_tpl = ExcelDropZone("Шаблон", "Перетащите файл шаблона")
         self.drop_tpl.set_compact_mode(True)
-        self.drop_tpl.setFixedHeight(40)
+        self.drop_tpl.setFixedHeight(48)
         self.drop_tpl.get_initial_dir = self._get_template_initial_dir
         self.drop_tpl.get_dialog_title = self._get_template_dialog_title
         self.drop_tpl.file_dropped.connect(self._on_tpl_dropped)
 
-        self.drop_arc = ExcelDropZone("Файл Аркус", "Перетащите файл Аркус")
+        self.drop_arc = ExcelDropZone("Аркус", "Перетащите файл Аркус")
         self.drop_arc.set_compact_mode(True)
-        self.drop_arc.setFixedHeight(40)
+        self.drop_arc.setFixedHeight(48)
         self.drop_arc.get_initial_dir = self._get_arcus_initial_dir
         self.drop_arc.get_dialog_title = self._get_arcus_dialog_title
         self.drop_arc.file_dropped.connect(self._on_arc_dropped)
 
-        self.drop_box.addWidget(self.drop_tpl)
-        self.drop_box.addWidget(self.drop_arc)
+        self.drop_box.addWidget(self.drop_tpl, 1)
+        self.drop_box.addWidget(self.drop_arc, 1)
         self.root_layout.addLayout(self.drop_box)
 
         save_box = QHBoxLayout()
         save_box.setSpacing(6)
-        self.lbl_save = QLabel("Сохранить:", objectName="FieldLabel")
-        self.lbl_save.setStyleSheet("font-size: 11px; font-weight: bold; color: #94A3B8;")
+        self.lbl_save = QLabel("Сохранить:", objectName="CompanionSaveLbl")
         self.txt_save = QLineEdit()
         self.txt_save.setPlaceholderText("Путь к итоговому файлу...")
-        self.txt_save.setFixedHeight(30)
-        self.txt_save.setStyleSheet("""
-            QLineEdit {
-                padding: 4px 8px;
-                font-size: 11px;
-            }
-        """)
+        self.txt_save.setFixedHeight(32)
         self.txt_save.textChanged.connect(self._on_save_text_changed)
         self.txt_save.returnPressed.connect(self._on_save_return_pressed)
 
         self.btn_browse = QPushButton(" Обзор", objectName="SecondaryButton")
         self.btn_browse.setIcon(get_svg_icon("folder"))
-        self.btn_browse.setFixedHeight(30)
+        self.btn_browse.setFixedHeight(32)
         self.btn_browse.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_browse.clicked.connect(self._browse_save)
 
@@ -594,19 +877,307 @@ class AuthenticFilesWindow(EdgeCompanionWindow):
         save_box.addWidget(self.btn_browse)
         self.root_layout.addLayout(save_box)
 
-        self.btn_repl = QPushButton("Мастер замен счетчиков", objectName="AccentButton")
+        self.btn_repl = QPushButton("Замены ИПУ", objectName="AccentButton")
         self.btn_repl.setIcon(get_svg_icon("replace"))
-        self.btn_repl.setFixedHeight(28)
+        self.btn_repl.setFixedHeight(32)
         self.btn_repl.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_repl.clicked.connect(self.replacement_clicked.emit)
         self.root_layout.addWidget(self.btn_repl)
 
+        self.update_theme_assets()
+
+    def update_theme_assets(self, theme_name: str = None):
+        super().update_theme_assets(theme_name)
+        t_name = self._current_theme_name
+        accent = ThemeManager.get_current_accent_color(t_name)
+        is_light = t_name in ("Pearl Light", "Как дома")
+
+        hdr_color = "#0F172A" if is_light else "#FFFFFF"
+        lbl_color = "#1E293B" if is_light else "#F1F5F9"
+        acc_txt = "#0A246A" if t_name == "Как дома" else ("#028090" if is_light else ("#D8B4FE" if t_name == "Deep Violet Glass" else accent))
+
+        self.lbl_hdr.setStyleSheet(f"font-size: 13px; font-weight: 800; color: {hdr_color} !important; background: transparent;")
+        self.lbl_smart_context.setStyleSheet(f"font-size: 12.5px; font-weight: 800; color: {acc_txt} !important; background: transparent;")
+        self.lbl_switch_house.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {lbl_color} !important; background: transparent;")
+        self.lbl_save.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {lbl_color} !important; background: transparent;")
+
+        if t_name == "Как дома":
+            self.smart_nav_frame.setStyleSheet("""
+                QFrame#SmartNavFrame {
+                    background-color: #FFFFFF !important;
+                    border: 1.5px solid #7F9DB9 !important;
+                    border-radius: 3px;
+                    padding: 3px 6px;
+                }
+            """)
+            self.combo_houses.setStyleSheet("""
+                QComboBox {
+                    font-size: 11.5px;
+                    font-weight: 600;
+                    padding: 2px 6px;
+                    border-radius: 2px;
+                    background-color: #FFFFFF !important;
+                    color: #000000 !important;
+                    border: 1.5px solid #7F9DB9 !important;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: #FFFFFF !important;
+                    color: #000000 !important;
+                    border: 1.5px solid #7F9DB9 !important;
+                    selection-background-color: #0A246A;
+                    selection-color: #FFFFFF;
+                }
+            """)
+            self.txt_save.setStyleSheet("""
+                QLineEdit {
+                    background-color: #FFFFFF !important;
+                    color: #000000 !important;
+                    font-weight: 600;
+                    padding: 3px 6px;
+                    font-size: 12px;
+                    border: 1.5px solid #7F9DB9 !important;
+                    border-radius: 2px;
+                }
+                QLineEdit:focus {
+                    border: 1.5px solid #0A246A !important;
+                    background-color: #FFFFFF !important;
+                }
+            """)
+            self.btn_browse.setStyleSheet("""
+                QPushButton {
+                    background-color: #ECE9D8 !important;
+                    border: 1px solid #7F9DB9 !important;
+                    border-radius: 2px;
+                    color: #000000 !important;
+                    font-size: 11.5px;
+                    font-weight: 700;
+                    padding: 3px 8px;
+                }
+                QPushButton:hover {
+                    background-color: #DFDBC8 !important;
+                }
+            """)
+            self.btn_browse.setIcon(get_svg_icon("folder", color="#000000"))
+            self.btn_repl.setStyleSheet("""
+                QPushButton {
+                    background-color: #005A9E !important;
+                    border: 1px solid #003D7A !important;
+                    border-radius: 3px;
+                    color: #FFFFFF !important;
+                    font-size: 11.5px;
+                    font-weight: 800;
+                    padding: 3px 8px;
+                }
+                QPushButton:hover {
+                    background-color: #0068B4 !important;
+                }
+            """)
+            self.btn_repl.setIcon(get_svg_icon("replace", color="#FFFFFF"))
+
+            self.btn_auto_arcus.setStyleSheet("""
+                QPushButton {
+                    background-color: #ECE9D8 !important;
+                    border: 1px solid #0A246A !important;
+                    border-radius: 2px;
+                    color: #0A246A !important;
+                    font-size: 11px;
+                    font-weight: 800;
+                    padding: 2px 6px;
+                }
+                QPushButton:hover {
+                    background-color: #0A246A !important;
+                    color: #FFFFFF !important;
+                }
+            """)
+            self.btn_auto_arcus.setIcon(get_svg_icon("sparkles", color="#0A246A"))
+        elif is_light:
+            self.smart_nav_frame.setStyleSheet("""
+                QFrame#SmartNavFrame {
+                    background-color: rgba(2, 128, 144, 0.08) !important;
+                    border: 1.5px solid rgba(2, 128, 144, 0.35) !important;
+                    border-radius: 8px;
+                    padding: 4px 8px;
+                }
+            """)
+            self.combo_houses.setStyleSheet("""
+                QComboBox {
+                    font-size: 12px;
+                    font-weight: 600;
+                    padding: 2px 6px;
+                    border-radius: 6px;
+                    background-color: #FFFFFF !important;
+                    color: #000000 !important;
+                    border: 1.5px solid #CBD5E1 !important;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: #FFFFFF !important;
+                    color: #0F172A !important;
+                    border: 1.5px solid #CBD5E1 !important;
+                    selection-background-color: #028090;
+                    selection-color: #FFFFFF;
+                }
+            """)
+            self.txt_save.setStyleSheet("""
+                QLineEdit {
+                    background-color: #FFFFFF !important;
+                    color: #000000 !important;
+                    font-weight: 600;
+                    padding: 4px 8px;
+                    font-size: 12.5px;
+                    border: 1.5px solid #CBD5E1 !important;
+                    border-radius: 6px;
+                }
+                QLineEdit:focus {
+                    border: 1.5px solid #028090 !important;
+                    background-color: #FFFFFF !important;
+                }
+            """)
+            self.btn_browse.setStyleSheet("""
+                QPushButton {
+                    background-color: #E2E8F0 !important;
+                    border: 1px solid #CBD5E1 !important;
+                    border-radius: 6px;
+                    color: #0F172A !important;
+                    font-size: 12px;
+                    font-weight: 700;
+                    padding: 4px 10px;
+                }
+                QPushButton:hover {
+                    background-color: #CBD5E1 !important;
+                }
+            """)
+            self.btn_browse.setIcon(get_svg_icon("folder", color="#0F172A"))
+            self.btn_repl.setStyleSheet("""
+                QPushButton {
+                    background-color: #E0F2FE !important;
+                    border: 1.5px solid #38BDF8 !important;
+                    border-radius: 6px;
+                    color: #0369A1 !important;
+                    font-size: 12.5px;
+                    font-weight: 800;
+                    padding: 4px 10px;
+                }
+                QPushButton:hover {
+                    background-color: #BAE6FD !important;
+                }
+            """)
+            self.btn_repl.setIcon(get_svg_icon("replace", color="#0369A1"))
+
+            self.btn_auto_arcus.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(2, 128, 144, 0.12) !important;
+                    border: 1.5px solid #028090 !important;
+                    border-radius: 6px;
+                    color: #028090 !important;
+                    font-size: 11.5px;
+                    font-weight: 800;
+                    padding: 3px 8px;
+                }
+                QPushButton:hover {
+                    background-color: #028090 !important;
+                    color: #FFFFFF !important;
+                }
+            """)
+            self.btn_auto_arcus.setIcon(get_svg_icon("sparkles", color="#028090"))
+        else:
+            self.smart_nav_frame.setStyleSheet(f"""
+                QFrame#SmartNavFrame {{
+                    background-color: rgba(255, 255, 255, 0.06) !important;
+                    border: 1.5px solid {accent} !important;
+                    border-radius: 8px;
+                    padding: 4px 8px;
+                }}
+            """)
+            self.combo_houses.setStyleSheet(f"""
+                QComboBox {{
+                    font-size: 12px;
+                    font-weight: 600;
+                    padding: 2px 6px;
+                    border-radius: 6px;
+                    background-color: #0F172A !important;
+                    color: #FFFFFF !important;
+                    border: 1.5px solid rgba(255, 255, 255, 0.3) !important;
+                }}
+                QComboBox QAbstractItemView {{
+                    background-color: #0F172A !important;
+                    color: #FFFFFF !important;
+                    border: 1.5px solid rgba(255, 255, 255, 0.3) !important;
+                    selection-background-color: {accent};
+                    selection-color: #000000;
+                }}
+            """)
+            self.txt_save.setStyleSheet(f"""
+                QLineEdit {{
+                    background-color: #0F172A !important;
+                    color: #FFFFFF !important;
+                    font-weight: 600;
+                    padding: 4px 8px;
+                    font-size: 12.5px;
+                    border: 1.5px solid rgba(255, 255, 255, 0.3) !important;
+                    border-radius: 6px;
+                }}
+                QLineEdit:focus {{
+                    border: 1.5px solid {accent} !important;
+                    background-color: #1E293B !important;
+                }}
+            """)
+            self.btn_browse.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: rgba(255, 255, 255, 0.12) !important;
+                    border: 1px solid rgba(255, 255, 255, 0.25) !important;
+                    border-radius: 6px;
+                    color: #FFFFFF !important;
+                    font-size: 12px;
+                    font-weight: 700;
+                    padding: 4px 10px;
+                }}
+                QPushButton:hover {{
+                    background-color: rgba(255, 255, 255, 0.22) !important;
+                    border-color: {accent} !important;
+                }}
+            """)
+            self.btn_browse.setIcon(get_svg_icon("folder", color="#FFFFFF"))
+            self.btn_repl.setStyleSheet(f"""
+                QPushButton {{
+                    background: rgba(255, 255, 255, 0.15);
+                    border: 1.5px solid {accent};
+                    border-radius: 6px;
+                    color: {acc_txt};
+                    font-size: 12.5px;
+                    font-weight: 800;
+                    padding: 4px 10px;
+                }}
+                QPushButton:hover {{
+                    background: {accent};
+                    color: #000000;
+                }}
+            """)
+            self.btn_repl.setIcon(get_svg_icon("replace", color=acc_txt))
+
+            self.btn_auto_arcus.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: rgba(0, 242, 254, 0.12) !important;
+                    border: 1.5px solid {accent} !important;
+                    border-radius: 6px;
+                    color: {accent} !important;
+                    font-size: 11.5px;
+                    font-weight: 800;
+                    padding: 3px 8px;
+                }}
+                QPushButton:hover {{
+                    background-color: {accent} !important;
+                    color: #000000 !important;
+                }}
+            """)
+            self.btn_auto_arcus.setIcon(get_svg_icon("sparkles", color=accent))
+
+        self.drop_tpl._update_theme_colors(t_name)
+        self.drop_arc._update_theme_colors(t_name)
+        self.update()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if self.width() > 500:
-            self.drop_box.setDirection(QBoxLayout.Direction.LeftToRight)
-        else:
-            self.drop_box.setDirection(QBoxLayout.Direction.TopToBottom)
+        self.update()
 
     def _get_template_initial_dir(self) -> str:
         if self.manager:
@@ -631,6 +1202,8 @@ class AuthenticFilesWindow(EdgeCompanionWindow):
     def _on_tpl_dropped(self, path: str):
         if not path:
             return
+        if self.tpl_path and os.path.normpath(self.tpl_path) == os.path.normpath(path):
+            return
         self.tpl_path = path
 
         # Сброс замен ИПУ для нового шаблона
@@ -644,34 +1217,192 @@ class AuthenticFilesWindow(EdgeCompanionWindow):
                 self.update_replacements_badge(0)
                 self.manager.show_toast("Предыдущие замены ИПУ сброшены для нового шаблона", "INFO")
 
-        out_dir = os.path.dirname(os.path.abspath(path))
+        out_dir = os.path.dirname(os.path.abspath(path)) if os.path.isfile(path) else os.path.abspath(path)
         QSettings("WaterMetrics", "Directories").setValue("LastTemplateDir", out_dir)
 
-        # Автоматический расчет имени следующего месяца
+        # Автоматический анализ контекста папок, дома и следующего месяца
+        found_arc = None
         try:
-            out_filename = self.excel_manager.parse_house_and_next_month(path)
-            last_out_dir = QSettings("WaterMetrics", "Directories").value("LastOutputDir", "", type=str) or out_dir
-            full_save = os.path.join(last_out_dir, out_filename).replace('\\', '/')
-            self.set_save_path(full_save)
-            self.save_path_changed.emit(full_save)
+            self.folder_ctx = FolderNavigationService.detect_folder_context(path)
+            self._update_smart_navigation_ui()
+
+            sug_save = self.folder_ctx.get("suggested_save_path")
+            if sug_save:
+                self.set_save_path(sug_save)
+                self.save_path_changed.emit(sug_save)
+            else:
+                out_filename = self.excel_manager.parse_house_and_next_month(path)
+                last_out_dir = QSettings("WaterMetrics", "Directories").value("LastOutputDir", "", type=str) or out_dir
+                full_save = os.path.join(last_out_dir, out_filename).replace('\\', '/')
+                self.set_save_path(full_save)
+                self.save_path_changed.emit(full_save)
+
+            found_arc = self.folder_ctx.get("found_arcus_path")
         except Exception:
             pass
+
+        if found_arc and os.path.exists(found_arc):
+            self.arc_path = found_arc
+            self.drop_arc.set_file_path(found_arc, notify=False)
+            self.arcus_changed.emit(found_arc)
+        elif path and self.arc_path:
+            house_id = self.folder_ctx.get("house_name") or os.path.basename(path)
+            arc_addr = FolderNavigationService.extract_house_name_from_arcus_content(self.arc_path)
+            is_match = FolderNavigationService.is_house_match(house_id, os.path.basename(self.arc_path)) or (arc_addr and FolderNavigationService.is_house_match(house_id, arc_addr))
+            if not is_match:
+                self.arc_path = ""
+                self.drop_arc.clear_file()
+                self.arcus_changed.emit("")
 
         self._update_file_linking_status()
         self.template_changed.emit(path)
 
+    def _update_smart_navigation_ui(self):
+        ctx = self.folder_ctx
+        if not ctx or not ctx.get("template_path"):
+            self.smart_nav_frame.setVisible(False)
+            if self.manager:
+                QTimer.singleShot(10, lambda: self.manager.relayout_dock(animate=True))
+            return
+
+        self.smart_nav_frame.setVisible(True)
+        house_name = ctx.get("house_name") or "Дом"
+        next_m_name = ctx.get("next_month_name") or "След. месяц"
+        next_y = ctx.get("next_year") or ""
+        self.lbl_smart_context.setText(f"🏢 {house_name}  ➔  Расчет на {next_m_name} {next_y}")
+
+        # Обновляем список домов в папке
+        houses = ctx.get("available_houses", [])
+        self.combo_houses.blockSignals(True)
+        self.combo_houses.clear()
+        if len(houses) > 1:
+            for idx, h in enumerate(houses):
+                self.combo_houses.addItem(h["name"], h["path"])
+                if self.tpl_path and os.path.normpath(h["path"]) == os.path.normpath(self.tpl_path):
+                    self.combo_houses.setCurrentIndex(idx)
+            self.combo_houses.setVisible(True)
+            self.lbl_switch_house.setVisible(True)
+        else:
+            self.combo_houses.setVisible(False)
+            self.lbl_switch_house.setVisible(False)
+        self.combo_houses.blockSignals(False)
+
+        # Авто-найденный Аркус (на отдельной строке на всю ширину карточки)
+        found_arc = ctx.get("found_arcus_path")
+        if found_arc and os.path.exists(found_arc) and (not self.arc_path or os.path.normpath(found_arc) != os.path.normpath(self.arc_path)):
+            arc_name = os.path.basename(found_arc)
+            arc_short = arc_name if len(arc_name) <= 26 else (arc_name[:23] + "...")
+            self.btn_auto_arcus.setText(f"⚡ Подключить Аркус: {arc_short}")
+            self.btn_auto_arcus.setToolTip(f"Нажмите для автоматического подключения найденного файла Аркус:\n{found_arc}")
+            self.btn_auto_arcus.setVisible(True)
+        else:
+            self.btn_auto_arcus.setVisible(False)
+
+        # Проверка существующего отчета
+        exist_info = ctx.get("existing_report_info")
+        if exist_info:
+            self.lbl_exist_alert.setText(f"⚠️ Отчет за {next_m_name} уже на диске")
+            self.lbl_exist_alert.setToolTip(f"В целевой папке уже найден отчет:\n{exist_info}")
+            self.lbl_exist_alert.setVisible(True)
+        else:
+            self.lbl_exist_alert.setVisible(False)
+
+        if self.manager:
+            QTimer.singleShot(10, lambda: self.manager.relayout_dock(animate=True))
+
+    def _on_house_combo_changed(self, idx: int):
+        if idx < 0:
+            return
+        selected_path = self.combo_houses.itemData(idx)
+        if selected_path and os.path.exists(selected_path):
+            if not self.tpl_path or os.path.normpath(selected_path) != os.path.normpath(self.tpl_path):
+                self.tpl_path = selected_path
+                self.drop_tpl.set_file_path(selected_path, notify=False)
+                out_dir = os.path.dirname(os.path.abspath(selected_path)) if os.path.isfile(selected_path) else os.path.abspath(selected_path)
+                QSettings("WaterMetrics", "Directories").setValue("LastTemplateDir", out_dir)
+                found_arc = None
+                try:
+                    self.folder_ctx = FolderNavigationService.detect_folder_context(selected_path)
+                    self._update_smart_navigation_ui()
+                    sug_save = self.folder_ctx.get("suggested_save_path")
+                    if sug_save:
+                        self.set_save_path(sug_save)
+                        self.save_path_changed.emit(sug_save)
+
+                    found_arc = self.folder_ctx.get("found_arcus_path")
+                except Exception:
+                    pass
+
+                if found_arc and os.path.exists(found_arc):
+                    self.arc_path = found_arc
+                    self.drop_arc.set_file_path(found_arc, notify=False)
+                    self.arcus_changed.emit(found_arc)
+                elif selected_path and self.arc_path and not FolderNavigationService.is_house_match(os.path.basename(selected_path), os.path.basename(self.arc_path)):
+                    self.arc_path = ""
+                    self.drop_arc.clear_file()
+                    self.arcus_changed.emit("")
+
+                self._update_file_linking_status()
+                self.template_changed.emit(selected_path)
+
+                # Проверка кэша сессии импорта и установка подсказок в карточку показателей
+                house_name = self.folder_ctx.get("house_name") if self.folder_ctx else ""
+                if not house_name and selected_path:
+                    house_name = ExcelManager.extract_house_name(selected_path)
+                if house_name:
+                    from services.import_session_service import ImportSessionService
+                    sug_vals = ImportSessionService.get_values_for_house(house_name)
+                    if sug_vals and self.manager and hasattr(self.manager, 'win_values') and self.manager.win_values:
+                        c = str(sug_vals.get('хвс', 0.0))
+                        h = str(sug_vals.get('гвс', 0.0))
+                        d = str(sug_vals.get('доб', 0.0))
+                        self.manager.win_values.set_suggested_values(c, h, d)
+
+    def _on_auto_arcus_clicked(self):
+        found_arc = self.folder_ctx.get("found_arcus_path")
+        if found_arc and os.path.exists(found_arc):
+            self.arc_path = found_arc
+            self.drop_arc.set_file_path(found_arc, notify=False)
+            out_dir = os.path.dirname(os.path.abspath(found_arc)) if os.path.isfile(found_arc) else os.path.abspath(found_arc)
+            QSettings("WaterMetrics", "Directories").setValue("LastArcusDir", out_dir)
+            self._update_file_linking_status()
+            self.btn_auto_arcus.setVisible(False)
+            self.arcus_changed.emit(found_arc)
+            if self.manager:
+                self.manager.show_toast(f"Файл Аркус подключен: {os.path.basename(found_arc)}", "SUCCESS")
+
     def _on_arc_dropped(self, path: str):
         if not path:
             return
+        if self.arc_path and os.path.normpath(self.arc_path) == os.path.normpath(path):
+            return
+
+        if self.tpl_path and path:
+            month_val = FolderNavigationService.validate_arcus_month_folder(self.tpl_path, path)
+            if not month_val["is_valid"]:
+                confirmed = FileGuardDialog.show_month_mismatch_dialog(
+                    self,
+                    tpl_house=os.path.basename(self.tpl_path),
+                    target_month_str=month_val["target_month_name"],
+                    arc_month_str=month_val["arcus_month_name"] or "Неизвестно",
+                    arc_path=path
+                )
+                if not confirmed:
+                    self.drop_arc.clear_file()
+                    return
+
         self.arc_path = path
-        out_dir = os.path.dirname(os.path.abspath(path))
+        out_dir = os.path.dirname(os.path.abspath(path)) if os.path.isfile(path) else os.path.abspath(path)
         QSettings("WaterMetrics", "Directories").setValue("LastArcusDir", out_dir)
         self._update_file_linking_status()
         self.arcus_changed.emit(path)
+        if hasattr(self, '_update_smart_navigation_ui'):
+            self._update_smart_navigation_ui()
 
     def _on_save_text_changed(self, text: str):
-        self.save_path = text
-        self.save_path_changed.emit(text)
+        if self.save_path != text:
+            self.save_path = text
+            self.save_path_changed.emit(text)
 
     def _on_save_return_pressed(self):
         if self.manager:
@@ -691,7 +1422,11 @@ class AuthenticFilesWindow(EdgeCompanionWindow):
         if self.arc_path:
             arc_name = os.path.basename(self.arc_path)
             if self.tpl_path:
-                self.drop_arc.set_highlight_state("linked", f"✓ {arc_name}")
+                month_val = FolderNavigationService.validate_arcus_month_folder(self.tpl_path, self.arc_path)
+                if not month_val["is_valid"]:
+                    self.drop_arc.set_highlight_state("warning", f"⚠️ Папка: {month_val['arcus_month_name']}")
+                else:
+                    self.drop_arc.set_highlight_state("linked", f"✓ {arc_name}")
             else:
                 self.drop_arc.set_highlight_state("warning", f"✓ {arc_name} (без шаблона)")
         else:
@@ -709,18 +1444,44 @@ class AuthenticFilesWindow(EdgeCompanionWindow):
             self.btn_repl.setToolTip("Открыть Мастер замен счетчиков ИПУ")
 
     def set_template_path(self, path: str):
+        if self.tpl_path and path and os.path.normpath(self.tpl_path) == os.path.normpath(path):
+            return
         self.tpl_path = path
-        self.drop_tpl.set_file_path(path)
+        self.drop_tpl.set_file_path(path, notify=False)
+        found_arc = None
+        if path and os.path.exists(path):
+            try:
+                self.folder_ctx = FolderNavigationService.detect_folder_context(path)
+                self._update_smart_navigation_ui()
+                found_arc = self.folder_ctx.get("found_arcus_path")
+            except Exception:
+                pass
+
+        if found_arc and os.path.exists(found_arc):
+            self.arc_path = found_arc
+            self.drop_arc.set_file_path(found_arc, notify=False)
+        elif path and self.arc_path and not FolderNavigationService.is_house_match(os.path.basename(path), os.path.basename(self.arc_path)):
+            self.arc_path = ""
+            self.drop_arc.clear_file()
+
         self._update_file_linking_status()
 
     def set_arcus_path(self, path: str):
+        if self.arc_path and path and os.path.normpath(self.arc_path) == os.path.normpath(path):
+            return
         self.arc_path = path
-        self.drop_arc.set_file_path(path)
+        self.drop_arc.set_file_path(path, notify=False)
         self._update_file_linking_status()
+        if hasattr(self, '_update_smart_navigation_ui'):
+            self._update_smart_navigation_ui()
 
     def set_save_path(self, path: str):
+        if self.save_path and path and os.path.normpath(self.save_path) == os.path.normpath(path):
+            return
         self.save_path = path
+        self.txt_save.blockSignals(True)
         self.txt_save.setText(path)
+        self.txt_save.blockSignals(False)
 
     def _browse_save(self):
         settings = QSettings("WaterMetrics", "Directories")
@@ -746,16 +1507,19 @@ class AuthenticValuesWindow(EdgeCompanionWindow):
         self.init_ui()
 
     def init_ui(self):
+        self.input_labels = []
+        self.input_fields = []
+
         hdr_row = QHBoxLayout()
-        hdr_row.setSpacing(4)
-        lbl_hdr = QLabel("⋮⋮  📊 Показатели ввода", objectName="FieldLabel")
-        lbl_hdr.setStyleSheet("font-size: 11px; font-weight: bold; color: #94A3B8;")
-        hdr_row.addWidget(lbl_hdr)
+        hdr_row.setSpacing(6)
+        self.lbl_hdr = QLabel("⋮⋮ 📊 Показатели", objectName="CompanionValHdr")
+        self.lbl_hdr.setFixedHeight(22)
+        hdr_row.addWidget(self.lbl_hdr)
         hdr_row.addStretch()
         self.root_layout.addLayout(hdr_row)
 
         grid = QHBoxLayout()
-        grid.setSpacing(6)
+        grid.setSpacing(8)
 
         self.txt_cold = self._create_input("ХВС:", grid)
         self.txt_hot = self._create_input("ГВС:", grid)
@@ -771,14 +1535,157 @@ class AuthenticValuesWindow(EdgeCompanionWindow):
 
         self.root_layout.addLayout(grid)
 
-        self.lbl_sum = QLabel("Сумма: 0.00 м³", objectName="FieldLabel")
-        accent = ThemeManager.get_current_accent_color()
-        self.lbl_sum.setStyleSheet(f"font-weight: 700; font-size: 12px; color: {accent};")
+        self.lbl_sum = QLabel("Сумма: 0.00 м³", objectName="CompanionSumLbl")
         self.root_layout.addWidget(self.lbl_sum)
+
+        # Кнопка импорта показаний из внешней набивочной таблицы
+        self.btn_import = QPushButton("📥 Из таблицы")
+        self.btn_import.setFixedHeight(30)
+        self.btn_import.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_import.setToolTip("Импорт ХВС/ГВС/ДОБ из набивочной таблицы Excel")
+        self.btn_import.clicked.connect(self._open_import_dialog)
+        self.root_layout.addWidget(self.btn_import)
 
         self.txt_cold.textChanged.connect(self._on_changed)
         self.txt_hot.textChanged.connect(self._on_changed)
         self.txt_corr.textChanged.connect(self._on_changed)
+
+        self.update_theme_assets()
+
+    def update_theme_assets(self, theme_name: str = None):
+        super().update_theme_assets(theme_name)
+        t_name = self._current_theme_name
+        accent = ThemeManager.get_current_accent_color(t_name)
+        is_light = t_name in ("Pearl Light", "Как дома")
+
+        hdr_color = "#0F172A" if is_light else "#FFFFFF"
+        lbl_color = "#1E293B" if is_light else "#F1F5F9"
+        sum_color = "#0A246A" if t_name == "Как дома" else ("#028090" if is_light else ("#D8B4FE" if t_name == "Deep Violet Glass" else accent))
+
+        if hasattr(self, 'lbl_hdr'):
+            self.lbl_hdr.setStyleSheet(f"font-size: 13px; font-weight: 800; color: {hdr_color} !important; background: transparent;")
+
+        if hasattr(self, 'lbl_sum'):
+            self.lbl_sum.setStyleSheet(f"font-weight: 800; font-size: 14px; color: {sum_color} !important; background: transparent;")
+
+        for lbl in getattr(self, 'input_labels', []):
+            lbl.setStyleSheet(f"font-size: 12.5px; font-weight: 800; color: {lbl_color} !important; background: transparent;")
+
+        for txt in getattr(self, 'input_fields', []):
+            if t_name == "Как дома":
+                txt.setStyleSheet("""
+                    QLineEdit {
+                        background: #FFFFFF;
+                        color: #000000;
+                        font-family: 'Consolas', 'JetBrains Mono', monospace;
+                        font-weight: 700;
+                        font-size: 14px;
+                        border: 1.5px solid #7F9DB9;
+                        border-radius: 2px;
+                        padding: 3px 6px;
+                    }
+                    QLineEdit[suggested="true"] {
+                        color: #808080 !important;
+                        font-style: italic;
+                    }
+                    QLineEdit:focus {
+                        border-color: #0A246A;
+                    }
+                """)
+            elif is_light:
+                txt.setStyleSheet("""
+                    QLineEdit {
+                        background: #FFFFFF;
+                        color: #000000;
+                        font-family: 'Consolas', 'JetBrains Mono', monospace;
+                        font-weight: 700;
+                        font-size: 15px;
+                        border: 1.5px solid #94A3B8;
+                        border-radius: 6px;
+                        padding: 4px 8px;
+                    }
+                    QLineEdit[suggested="true"] {
+                        color: #64748B !important;
+                        font-style: italic;
+                    }
+                    QLineEdit:focus {
+                        border-color: #028090;
+                    }
+                """)
+            else:
+                txt.setStyleSheet(f"""
+                    QLineEdit {{
+                        background: #0F172A;
+                        color: #FFFFFF;
+                        font-family: 'Consolas', 'JetBrains Mono', monospace;
+                        font-weight: 700;
+                        font-size: 15px;
+                        border: 1.5px solid rgba(255, 255, 255, 0.35);
+                        border-radius: 6px;
+                        padding: 4px 8px;
+                    }}
+                    QLineEdit[suggested="true"] {{
+                        color: #94A3B8 !important;
+                        font-style: italic;
+                    }}
+                    QLineEdit:focus {{
+                        border-color: {accent};
+                        background: #1E293B;
+                    }}
+                """)
+
+        # Стиль кнопки импорта
+        if hasattr(self, 'btn_import'):
+            if t_name == "Как дома":
+                self.btn_import.setStyleSheet("""
+                    QPushButton {
+                        background: #ECE9D8;
+                        color: #000000;
+                        border: 1px solid #7F9DB9;
+                        border-radius: 2px;
+                        font-size: 12px;
+                        font-weight: bold;
+                        padding: 4px 8px;
+                    }
+                    QPushButton:hover {
+                        background: #DFDBC8;
+                        border-color: #0A246A;
+                    }
+                """)
+            elif is_light:
+                self.btn_import.setStyleSheet("""
+                    QPushButton {
+                        background: rgba(2, 128, 144, 0.12);
+                        color: #028090;
+                        border: 1px solid rgba(2, 128, 144, 0.3);
+                        border-radius: 6px;
+                        font-size: 12px;
+                        font-weight: bold;
+                        padding: 4px 8px;
+                    }
+                    QPushButton:hover {
+                        background: rgba(2, 128, 144, 0.22);
+                        border-color: #028090;
+                    }
+                """)
+            else:
+                self.btn_import.setStyleSheet(f"""
+                    QPushButton {{
+                        background: rgba(255, 255, 255, 0.08);
+                        color: {accent};
+                        border: 1px solid rgba(255, 255, 255, 0.15);
+                        border-radius: 6px;
+                        font-size: 12px;
+                        font-weight: bold;
+                        padding: 4px 8px;
+                    }}
+                    QPushButton:hover {{
+                        background: rgba(255, 255, 255, 0.14);
+                        border-color: {accent};
+                    }}
+                """)
+
+        self.update()
 
     def _on_corr_return_pressed(self):
         if self.manager and hasattr(self.manager, 'win_files'):
@@ -788,10 +1695,11 @@ class AuthenticValuesWindow(EdgeCompanionWindow):
     def _create_input(self, label: str, layout: QHBoxLayout) -> SmartNumericLineEdit:
         box = QVBoxLayout()
         box.setSpacing(2)
-        lbl = QLabel(label, objectName="FieldLabel")
-        lbl.setStyleSheet("font-size: 11px; font-weight: bold; color: #94A3B8;")
+        lbl = QLabel(label, objectName="CompanionValFieldLbl")
         txt = SmartNumericLineEdit("0.0")
-        txt.setMinimumHeight(28)
+        txt.setMinimumHeight(34)
+        self.input_labels.append(lbl)
+        self.input_fields.append(txt)
         box.addWidget(lbl)
         box.addWidget(txt)
         layout.addLayout(box)
@@ -808,10 +1716,52 @@ class AuthenticValuesWindow(EdgeCompanionWindow):
 
         self.values_changed.emit(self.txt_cold.text(), self.txt_hot.text(), self.txt_corr.text())
 
+    def _open_import_dialog(self):
+        """Открыть диалог импорта показаний из внешней набивочной таблицы Excel."""
+        from ui.dialogs.excel_import_dialog import ExcelImportDialog
+
+        house_name = ""
+        if self.manager and hasattr(self.manager, 'win_files'):
+            tpl_path = getattr(self.manager.win_files, 'tpl_path', '')
+            if tpl_path:
+                house_name = ExcelManager.extract_house_name(tpl_path)
+
+        dlg = ExcelImportDialog(self, house_name=house_name)
+        dlg.values_accepted.connect(self._apply_imported_values)
+        dlg.exec()
+
+    def _apply_imported_values(self, hvs: float, gvs: float, dob: float):
+        """Применить импортированные значения и синхронизировать с дашбордом."""
+        self.set_values(str(hvs), str(gvs), str(dob))
+
+        # Синхронизация с дашбордом
+        if self.manager and hasattr(self.manager, 'main_window'):
+            dash = getattr(self.manager.main_window, 'page_dashboard', None)
+            if dash and hasattr(dash, 'txt_cold'):
+                dash.txt_cold.setText(str(hvs))
+                dash.txt_hot.setText(str(gvs))
+                dash.txt_corr.setText(str(dob))
+
+        from ui.components.toast import ToastNotification
+        ToastNotification.show_toast(self, f"✅ Импортировано: ХВС={hvs}, ГВС={gvs}, ДОБ={dob}", "SUCCESS")
+
+    def set_suggested_values(self, c: str, h: str, d: str):
+        """Устанавливает предложенные показатели из кэша сессии (серый курсив до Enter)."""
+        for field, val in [(self.txt_cold, c), (self.txt_hot, h), (self.txt_corr, d)]:
+            field.blockSignals(True)
+            if hasattr(field, 'set_suggested_value'):
+                field.set_suggested_value(val or "0.0")
+            else:
+                field.setText(val or "0.0")
+            field.blockSignals(False)
+        self._on_changed()
+
     def set_values(self, c: str, h: str, d: str):
         for field, val in [(self.txt_cold, c), (self.txt_hot, h), (self.txt_corr, d)]:
             field.blockSignals(True)
             field.setText(val or "0.0")
+            if hasattr(field, 'commit_suggestion'):
+                field.commit_suggestion()
             field.blockSignals(False)
         self._on_changed()
 
@@ -827,9 +1777,8 @@ class AuthenticHistoryWindow(EdgeCompanionWindow):
         self.init_ui()
 
     def init_ui(self):
-        lbl_hist = QLabel("⋮⋮  🕒 История отчетов", objectName="SectionTitle")
-        lbl_hist.setStyleSheet("font-size: 11px; font-weight: bold;")
-        self.root_layout.addWidget(lbl_hist)
+        self.lbl_hist = QLabel("⋮⋮  🕒 История отчетов", objectName="SectionTitle")
+        self.root_layout.addWidget(self.lbl_hist)
 
         self.table_hist = QTableWidget(0, 2)
         self.table_hist.setHorizontalHeaderLabels(["Имя файла", "Полный путь"])
@@ -837,61 +1786,35 @@ class AuthenticHistoryWindow(EdgeCompanionWindow):
         self.table_hist.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table_hist.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         self.table_hist.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table_hist.setColumnWidth(0, 130)
+        self.table_hist.setColumnWidth(0, 140)
         self.table_hist.verticalHeader().setVisible(False)
-        self.table_hist.setFixedHeight(110)
+        self.table_hist.setFixedHeight(120)
         self.table_hist.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.table_hist.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table_hist.customContextMenuRequested.connect(self._show_context_menu)
         self.table_hist.cellDoubleClicked.connect(self._on_cell_double_clicked)
         self.table_hist.itemDoubleClicked.connect(self._on_item_double_clicked)
 
-        self.table_hist.setStyleSheet("""
-            QTableWidget {
-                background: rgba(15, 23, 42, 0.6);
-                border: 1px solid rgba(255, 255, 255, 0.10);
-                border-radius: 6px;
-                color: #FFFFFF;
-                font-size: 11px;
-            }
-        """)
         self.root_layout.addWidget(self.table_hist)
 
         btn_row = QHBoxLayout()
         btn_row.setContentsMargins(0, 0, 0, 0)
-        btn_row.setSpacing(4)
-
-        btn_style = """
-            QPushButton {
-                font-size: 10px;
-                font-weight: 600;
-                padding: 4px 4px;
-                border-radius: 6px;
-            }
-        """
+        btn_row.setSpacing(6)
 
         self.btn_open = QPushButton("Открыть", objectName="SecondaryButton")
-        self.btn_open.setIcon(get_svg_icon("folder"))
-        self.btn_open.setStyleSheet(btn_style)
-        self.btn_open.setMinimumHeight(26)
+        self.btn_open.setMinimumHeight(30)
         self.btn_open.clicked.connect(self._open_selected)
 
         self.btn_folder = QPushButton("В папку", objectName="SecondaryButton")
-        self.btn_folder.setIcon(get_svg_icon("folder"))
-        self.btn_folder.setStyleSheet(btn_style)
-        self.btn_folder.setMinimumHeight(26)
+        self.btn_folder.setMinimumHeight(30)
         self.btn_folder.clicked.connect(self._show_in_folder)
 
         self.btn_clr = QPushButton("Удалить", objectName="SecondaryButton")
-        self.btn_clr.setIcon(get_svg_icon("trash"))
-        self.btn_clr.setStyleSheet(btn_style)
-        self.btn_clr.setMinimumHeight(26)
+        self.btn_clr.setMinimumHeight(30)
         self.btn_clr.clicked.connect(self._remove_selected)
 
         self.btn_clear_all = QPushButton("Очистить", objectName="SecondaryButton")
-        self.btn_clear_all.setIcon(get_svg_icon("trash", color="#F87171"))
-        self.btn_clear_all.setStyleSheet(btn_style)
-        self.btn_clear_all.setMinimumHeight(26)
+        self.btn_clear_all.setMinimumHeight(30)
         self.btn_clear_all.clicked.connect(self._clear_all)
 
         btn_row.addWidget(self.btn_open, 1)
@@ -899,6 +1822,217 @@ class AuthenticHistoryWindow(EdgeCompanionWindow):
         btn_row.addWidget(self.btn_clr, 1)
         btn_row.addWidget(self.btn_clear_all, 1)
         self.root_layout.addLayout(btn_row)
+
+        self.update_theme_assets()
+
+    def update_theme_assets(self, theme_name: str = None):
+        super().update_theme_assets(theme_name)
+        t_name = self._current_theme_name
+        accent = ThemeManager.get_current_accent_color(t_name)
+        is_light = t_name in ("Pearl Light", "Как дома")
+
+        hdr_color = "#0F172A" if is_light else "#FFFFFF"
+        if hasattr(self, 'lbl_hist'):
+            self.lbl_hist.setStyleSheet(f"font-size: 13.5px; font-weight: 800; color: {hdr_color} !important; background: transparent;")
+
+        if t_name == "Как дома":
+            self.table_hist.setStyleSheet("""
+                QTableWidget {
+                    background: #FFFFFF;
+                    border: 1.5px solid #7F9DB9;
+                    border-radius: 2px;
+                    color: #000000;
+                    font-size: 11.5px;
+                }
+                QHeaderView::section {
+                    background: #ECE9D8;
+                    color: #000000;
+                    font-weight: 700;
+                    font-size: 11px;
+                    border: 1px solid #7F9DB9;
+                    padding: 3px 6px;
+                }
+                QTableWidget::item {
+                    color: #000000;
+                    padding: 3px 6px;
+                }
+                QTableWidget::item:selected {
+                    background: #0A246A;
+                    color: #FFFFFF;
+                }
+            """)
+            sec_style = """
+                QPushButton {
+                    background: #ECE9D8;
+                    border: 1px solid #7F9DB9;
+                    border-radius: 2px;
+                    color: #000000;
+                    font-size: 11px;
+                    font-weight: 700;
+                    padding: 3px 6px;
+                }
+                QPushButton:hover {
+                    background: #DFDBC8;
+                }
+            """
+            dng_style = """
+                QPushButton {
+                    background: #ECE9D8;
+                    border: 1px solid #7F9DB9;
+                    border-radius: 2px;
+                    color: #CC0000;
+                    font-size: 11px;
+                    font-weight: 700;
+                    padding: 3px 6px;
+                }
+                QPushButton:hover {
+                    background: #FEE2E2;
+                }
+            """
+        elif is_light:
+            self.table_hist.setStyleSheet("""
+                QTableWidget {
+                    background: #FFFFFF;
+                    border: 1.5px solid #CBD5E1;
+                    border-radius: 6px;
+                    color: #000000;
+                    font-size: 12.5px;
+                }
+                QHeaderView::section {
+                    background: #E2E8F0;
+                    color: #0F172A;
+                    font-weight: 800;
+                    font-size: 12px;
+                    border: none;
+                    padding: 4px 8px;
+                }
+                QTableWidget::item {
+                    color: #000000;
+                    padding: 4px 6px;
+                }
+                QTableWidget::item:selected {
+                    background: #028090;
+                    color: #FFFFFF;
+                }
+            """)
+            sec_style = """
+                QPushButton {
+                    background: #E2E8F0;
+                    border: 1px solid #CBD5E1;
+                    border-radius: 6px;
+                    color: #0F172A;
+                    font-size: 12px;
+                    font-weight: 700;
+                    padding: 4px 8px;
+                }
+                QPushButton:hover {
+                    background: #CBD5E1;
+                }
+            """
+            dng_style = """
+                QPushButton {
+                    background: #FEE2E2;
+                    border: 1px solid #FCA5A5;
+                    border-radius: 6px;
+                    color: #DC2626;
+                    font-size: 12px;
+                    font-weight: 700;
+                    padding: 4px 8px;
+                }
+                QPushButton:hover {
+                    background: #FECACA;
+                }
+            """
+        else:
+            self.table_hist.setStyleSheet(f"""
+                QTableWidget {{
+                    background: #0F172A;
+                    border: 1.5px solid rgba(255, 255, 255, 0.20);
+                    border-radius: 6px;
+                    color: #FFFFFF;
+                    font-size: 12.5px;
+                }}
+                QHeaderView::section {{
+                    background: #1E293B;
+                    color: #FFFFFF;
+                    font-weight: 800;
+                    font-size: 12px;
+                    border: none;
+                    border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+                    padding: 4px 8px;
+                }}
+                QTableWidget::item {{
+                    color: #FFFFFF;
+                    padding: 4px 6px;
+                }}
+                QTableWidget::item:selected {{
+                    background: rgba(0, 242, 254, 0.35);
+                    color: #FFFFFF;
+                }}
+            """)
+            sec_style = f"""
+                QPushButton {{
+                    background: rgba(255, 255, 255, 0.12);
+                    border: 1px solid rgba(255, 255, 255, 0.25);
+                    border-radius: 6px;
+                    color: #FFFFFF;
+                    font-size: 12px;
+                    font-weight: 700;
+                    padding: 4px 8px;
+                }}
+                QPushButton:hover {{
+                    background: rgba(255, 255, 255, 0.22);
+                    border-color: {accent};
+                }}
+            """
+            dng_style = """
+                QPushButton {
+                    background: rgba(239, 68, 68, 0.25);
+                    border: 1px solid #EF4444;
+                    border-radius: 6px;
+                    color: #FCA5A5;
+                    font-size: 12px;
+                    font-weight: 700;
+                    padding: 4px 8px;
+                }
+                QPushButton:hover {
+                    background: rgba(239, 68, 68, 0.45);
+                    color: #FFFFFF;
+                }
+            """
+
+        self.btn_open.setStyleSheet(sec_style)
+        self.btn_open.setIcon(get_svg_icon("folder", color="#000000" if t_name == "Как дома" else ("#0F172A" if is_light else "#FFFFFF")))
+        self.btn_folder.setStyleSheet(sec_style)
+        self.btn_folder.setIcon(get_svg_icon("folder", color="#000000" if t_name == "Как дома" else ("#0F172A" if is_light else "#FFFFFF")))
+        self.btn_clr.setStyleSheet(sec_style)
+        self.btn_clr.setIcon(get_svg_icon("trash", color="#000000" if t_name == "Как дома" else ("#0F172A" if is_light else "#FFFFFF")))
+        self.btn_clear_all.setStyleSheet(dng_style)
+        self.btn_clear_all.setIcon(get_svg_icon("trash", color="#CC0000" if t_name == "Как дома" else ("#DC2626" if is_light else "#FCA5A5")))
+        self.update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        w = self.width()
+        if w < 280:
+            self.btn_open.setText("")
+            self.btn_open.setToolTip("Открыть выделенные отчеты")
+            self.btn_folder.setText("")
+            self.btn_folder.setToolTip("Показать в папке")
+            self.btn_clr.setText("")
+            self.btn_clr.setToolTip("Удалить из истории")
+            self.btn_clear_all.setText("")
+            self.btn_clear_all.setToolTip("Очистить всю историю")
+        elif w < 340:
+            self.btn_open.setText("Открыть")
+            self.btn_folder.setText("Папка")
+            self.btn_clr.setText("Удалить")
+            self.btn_clear_all.setText("Очистить")
+        else:
+            self.btn_open.setText("Открыть")
+            self.btn_folder.setText("В папку")
+            self.btn_clr.setText("Удалить")
+            self.btn_clear_all.setText("Очистить")
 
     def _show_context_menu(self, pos: QPoint):
         item = self.table_hist.itemAt(pos)
@@ -1096,11 +2230,65 @@ class AuthenticRunWindow(EdgeCompanionWindow):
 
     def init_ui(self):
         self.btn_run = QPushButton("⚡ Сформировать файл отчета", objectName="PrimaryButton")
-        self.btn_run.setIcon(get_svg_icon("run", color="#020617"))
-        self.btn_run.setMinimumHeight(38)
+        self.btn_run.setMinimumHeight(44)
         self.btn_run.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_run.clicked.connect(self.run_requested.emit)
         self.root_layout.addWidget(self.btn_run)
+        self.update_theme_assets()
+
+    def update_theme_assets(self, theme_name: str = None):
+        super().update_theme_assets(theme_name)
+        t_name = self._current_theme_name
+        accent = ThemeManager.get_current_accent_color(t_name)
+        is_light = t_name in ("Pearl Light", "Как дома")
+
+        if t_name == "Как дома":
+            self.btn_run.setStyleSheet("""
+                QPushButton {
+                    background: #0A246A;
+                    color: #FFFFFF;
+                    font-weight: 900;
+                    font-size: 13px;
+                    border-radius: 3px;
+                    border: 1px solid #000000;
+                    min-height: 38px;
+                }
+                QPushButton:hover {
+                    background: #005A9E;
+                }
+            """)
+            self.btn_run.setIcon(get_svg_icon("run", color="#FFFFFF"))
+        elif is_light:
+            self.btn_run.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00A896, stop:1 #028090);
+                    color: #FFFFFF;
+                    font-weight: 900;
+                    font-size: 14px;
+                    border-radius: 8px;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #028090, stop:1 #00A896);
+                }
+            """)
+            self.btn_run.setIcon(get_svg_icon("run", color="#FFFFFF"))
+        else:
+            self.btn_run.setStyleSheet(f"""
+                QPushButton {{
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00A896, stop:1 {accent});
+                    color: #000000;
+                    font-weight: 900;
+                    font-size: 14px;
+                    border-radius: 8px;
+                    border: none;
+                }}
+                QPushButton:hover {{
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {accent}, stop:1 #00A896);
+                }}
+            """)
+            self.btn_run.setIcon(get_svg_icon("run", color="#000000"))
+        self.update()
 
     def set_running_state(self, is_running: bool):
         if is_running:
@@ -1153,14 +2341,14 @@ class CompanionModeManager:
             card.manager = self
 
         self.card_heights: Dict[EdgeCompanionWindow, int] = {
-            self.win_top_bar: 80,
-            self.win_files: 215,
-            self.win_values: 115,
-            self.win_hist: 190,
-            self.win_run: 56,
+            self.win_top_bar: 86,
+            self.win_files: 175,
+            self.win_values: 125,
+            self.win_hist: 200,
+            self.win_run: 60,
         }
-        self.card_spacing = 12
-        self.dock_width = 360
+        self.card_spacing = 10
+        self.dock_width = 380
         self.parked_peek = 16
         self.is_dock_expanded = False
         self._animating_dock = False
@@ -1190,37 +2378,157 @@ class CompanionModeManager:
 
         self._load_settings()
         self._connect_signals()
+        self.update_theme_styles()
         ThemeManager.on_theme_changed.append(self.update_theme_styles)
+
+    def update_theme_styles(self, theme_name: str = None):
+        """Обновляет оформление всех карточек режима набивки при смене темы."""
+        t_name = theme_name or ThemeManager.get_current_theme_name()
+        accent = ThemeManager.get_current_accent_color(t_name)
+        is_light = t_name in ("Pearl Light", "Как дома")
+        for card in self.cards:
+            card._current_theme_name = t_name
+            if hasattr(card, 'update_theme_assets'):
+                card.update_theme_assets(t_name)
+            card.update()
+            if hasattr(card, '_update_file_linking_status'):
+                card._update_file_linking_status()
+        if hasattr(self, 'win_mini_floater') and self.win_mini_floater:
+            if hasattr(self.win_mini_floater, 'update_theme_assets'):
+                self.win_mini_floater.update_theme_assets(t_name)
+            self.win_mini_floater.update()
+        if hasattr(self, 'tray_icon') and self.tray_icon:
+            self.tray_icon.setIcon(get_svg_icon("droplet", color=accent))
+            menu = self.tray_icon.contextMenu()
+            if menu:
+                if t_name == "Как дома":
+                    menu.setStyleSheet("""
+                        QMenu {
+                            background: #ECE9D8;
+                            border: 1px solid #7F9DB9;
+                            border-radius: 2px;
+                            padding: 2px;
+                            color: #000000;
+                            font-size: 11.5px;
+                        }
+                        QMenu::item {
+                            padding: 4px 18px;
+                            border-radius: 2px;
+                        }
+                        QMenu::item:selected {
+                            background: #0A246A;
+                            color: #FFFFFF;
+                        }
+                    """)
+                elif is_light:
+                    menu.setStyleSheet("""
+                        QMenu {
+                            background: #FFFFFF;
+                            border: 1px solid #CBD5E1;
+                            border-radius: 8px;
+                            padding: 4px;
+                            color: #0F172A;
+                            font-size: 12px;
+                        }
+                        QMenu::item {
+                            padding: 6px 20px;
+                            border-radius: 4px;
+                        }
+                        QMenu::item:selected {
+                            background: rgba(2, 128, 144, 0.15);
+                            color: #028090;
+                        }
+                    """)
+                else:
+                    menu.setStyleSheet(f"""
+                        QMenu {{
+                            background: #0F172A;
+                            border: 1px solid rgba(255, 255, 255, 0.15);
+                            border-radius: 8px;
+                            padding: 4px;
+                            color: #F8FAFC;
+                            font-size: 12px;
+                        }}
+                        QMenu::item {{
+                            padding: 6px 20px;
+                            border-radius: 4px;
+                        }}
+                        QMenu::item:selected {{
+                            background: rgba(0, 242, 254, 0.20);
+                            color: {accent};
+                        }}
+                    """)
 
     def _init_system_tray(self):
         """Инициализация иконки в системном трее Windows (область уведомлений)."""
         if not QSystemTrayIcon.isSystemTrayAvailable():
             return
-        accent = ThemeManager.get_current_accent_color()
+        t_name = ThemeManager.get_current_theme_name()
+        accent = ThemeManager.get_current_accent_color(t_name)
+        is_light = t_name in ("Pearl Light", "Как дома")
         parent = self.main_win if isinstance(self.main_win, QWidget) else None
         self.tray_icon = QSystemTrayIcon(parent)
         self.tray_icon.setIcon(get_svg_icon("droplet", color=accent))
         self.tray_icon.setToolTip("WaterMetrics — Режим набивки")
 
         menu = QMenu()
-        menu.setStyleSheet("""
-            QMenu {
-                background: #0F172A;
-                border: 1px solid rgba(255, 255, 255, 0.15);
-                border-radius: 8px;
-                padding: 4px;
-                color: #F8FAFC;
-                font-size: 12px;
-            }
-            QMenu::item {
-                padding: 6px 20px;
-                border-radius: 4px;
-            }
-            QMenu::item:selected {
-                background: rgba(0, 242, 254, 0.20);
-                color: #00F2FE;
-            }
-        """)
+        if t_name == "Как дома":
+            menu.setStyleSheet("""
+                QMenu {
+                    background: #ECE9D8;
+                    border: 1px solid #7F9DB9;
+                    border-radius: 2px;
+                    padding: 2px;
+                    color: #000000;
+                    font-size: 11.5px;
+                }
+                QMenu::item {
+                    padding: 4px 18px;
+                    border-radius: 2px;
+                }
+                QMenu::item:selected {
+                    background: #0A246A;
+                    color: #FFFFFF;
+                }
+            """)
+        elif is_light:
+            menu.setStyleSheet("""
+                QMenu {
+                    background: #FFFFFF;
+                    border: 1px solid #CBD5E1;
+                    border-radius: 8px;
+                    padding: 4px;
+                    color: #0F172A;
+                    font-size: 12px;
+                }
+                QMenu::item {
+                    padding: 6px 20px;
+                    border-radius: 4px;
+                }
+                QMenu::item:selected {
+                    background: rgba(2, 128, 144, 0.15);
+                    color: #028090;
+                }
+            """)
+        else:
+            menu.setStyleSheet(f"""
+                QMenu {{
+                    background: #0F172A;
+                    border: 1px solid rgba(255, 255, 255, 0.15);
+                    border-radius: 8px;
+                    padding: 4px;
+                    color: #F8FAFC;
+                    font-size: 12px;
+                }}
+                QMenu::item {{
+                    padding: 6px 20px;
+                    border-radius: 4px;
+                }}
+                QMenu::item:selected {{
+                    background: rgba(0, 242, 254, 0.20);
+                    color: {accent};
+                }}
+            """)
 
         act_restore = menu.addAction("⚡ Развернуть режим набивки")
         act_restore.triggered.connect(self.restore_from_tray)
@@ -1534,25 +2842,59 @@ class CompanionModeManager:
         order_list = [c.category.value for c in self.cards if c is not self.win_top_bar]
         settings.setValue("companion/card_order", order_list)
 
-    def update_theme_styles(self, theme_name: str = None):
-        for win in self.cards:
-            win.update()
-            if hasattr(win, '_update_file_linking_status'):
-                win._update_file_linking_status()
-        if hasattr(self, 'win_mini_floater'):
-            self.win_mini_floater.update()
-
     def _get_card_height(self, card: EdgeCompanionWindow) -> int:
         base_h = self.card_heights.get(card, 60)
-        # Динамический расчет с защитой от Windows DPI scaling и шрифтов системы:
-        # Гарантирует, что высота окна ВСЕГДА больше или равна реальным требованиям контента
         try:
-            min_h = card.minimumSizeHint().height() if hasattr(card, 'minimumSizeHint') else 0
-            layout_h = card.layout().sizeHint().height() if (hasattr(card, 'layout') and card.layout()) else 0
-            size_hint_h = card.sizeHint().height() if hasattr(card, 'sizeHint') else 0
-            return max(base_h, min_h, layout_h, size_hint_h)
+            if hasattr(card, 'root_layout') and card.root_layout:
+                card.root_layout.activate()
+                sh = card.root_layout.sizeHint().height()
+                mh = card.root_layout.minimumSize().height()
+                return max(base_h, sh, mh)
+            return base_h
         except Exception:
             return base_h
+
+    def relayout_dock(self, animate: bool = True):
+        """
+        Динамический перерасчет геометрии всех карточек в доке:
+        Если меняется размер одного окошка (появилась умная навигация, предупреждение,
+        изменился контент), все остальные окошки плавно и синхронно смещаются по вертикали,
+        сохраняя единый межстрочный отступ (card_spacing), эстетику и целостность интерфейса.
+        """
+        if not self.is_companion_active or self.is_returning_to_window or self.is_minimized_to_floater:
+            return
+        if any(c.is_dragging for c in self.cards):
+            return
+
+        screen = QApplication.screenAt(self.cards[0].pos()) or QApplication.primaryScreen()
+        screen_geo = screen.availableGeometry()
+        target_positions = self._calculate_dock_positions(screen_geo)
+        open_x = self._get_open_x(screen_geo)
+        park_x = self._get_park_x(screen_geo)
+        target_x = open_x if self.is_dock_expanded else park_x
+
+        if animate and not self._animating_dock and not self.is_flight_animating:
+            group = QParallelAnimationGroup(self.cards[0])
+            for card in self.cards:
+                target_y = target_positions[card]
+                h = self._get_card_height(card)
+                target_rect = QRect(target_x, target_y, self.dock_width, h)
+                card.base_docked_x = open_x
+                if card.geometry() != target_rect:
+                    anim = QPropertyAnimation(card, b"geometry")
+                    anim.setDuration(180)
+                    anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+                    anim.setStartValue(card.geometry())
+                    anim.setEndValue(target_rect)
+                    group.addAnimation(anim)
+            if group.animationCount() > 0:
+                group.start()
+        else:
+            for card in self.cards:
+                target_y = target_positions[card]
+                h = self._get_card_height(card)
+                card.setGeometry(QRect(target_x, target_y, self.dock_width, h))
+                card.base_docked_x = open_x
 
     def _get_open_x(self, screen_geo: QRect) -> int:
         if self.dock_side == DockSide.LEFT:
@@ -1632,6 +2974,7 @@ class CompanionModeManager:
         self.watchdog_timer.start()
         self.saved_main_is_maximized = self.main_win.isMaximized()
         self.saved_main_geometry = self.main_win.geometry()
+        self.update_theme_styles()
 
         p_main = getattr(self.main_win, 'page_main', None)
         if p_main:
@@ -2168,16 +3511,20 @@ class CompanionModeManager:
     def _sync_tpl_to_main(self, path: str):
         p_main = getattr(self.main_win, 'page_main', None)
         if p_main and hasattr(p_main, 'drop_tpl'):
-            p_main.drop_tpl.set_file_path(path)
-            if hasattr(p_main, '_on_template_selected'):
-                p_main._on_template_selected(path)
+            curr = getattr(p_main.drop_tpl, 'file_path', '')
+            if not curr or os.path.normpath(curr) != os.path.normpath(path):
+                p_main.drop_tpl.set_file_path(path, notify=False)
+                if hasattr(p_main, '_on_template_selected'):
+                    p_main._on_template_selected(path)
 
     def _sync_arc_to_main(self, path: str):
         p_main = getattr(self.main_win, 'page_main', None)
         if p_main and hasattr(p_main, 'drop_arc'):
-            p_main.drop_arc.set_file_path(path)
-            if hasattr(p_main, '_on_arcus_selected'):
-                p_main._on_arcus_selected(path)
+            curr = getattr(p_main.drop_arc, 'file_path', '')
+            if not curr or os.path.normpath(curr) != os.path.normpath(path):
+                p_main.drop_arc.set_file_path(path, notify=False)
+                if hasattr(p_main, '_on_arcus_selected'):
+                    p_main._on_arcus_selected(path)
 
     def _sync_values_to_main(self, cold: str, hot: str, corr: str):
         p_main = getattr(self.main_win, 'page_main', None)
@@ -2193,7 +3540,11 @@ class CompanionModeManager:
     def _sync_save_to_main(self, path: str):
         p_main = getattr(self.main_win, 'page_main', None)
         if p_main and hasattr(p_main, 'txt_save'):
-            p_main.txt_save.setText(path)
+            curr = p_main.txt_save.text()
+            if not curr or os.path.normpath(curr) != os.path.normpath(path):
+                p_main.txt_save.blockSignals(True)
+                p_main.txt_save.setText(path)
+                p_main.txt_save.blockSignals(False)
 
     def run_calculation(self):
         """Запуск расчета водопотребления из режима набивки."""
@@ -2205,6 +3556,7 @@ class CompanionModeManager:
         sav = self.win_files.save_path
 
         if not tpl or not arc or not sav:
+            self.win_run.set_running_state(False)
             self.show_toast("Укажите все пути к Excel файлам!", "ERROR")
             return
 
@@ -2213,6 +3565,7 @@ class CompanionModeManager:
             float(self.win_values.txt_hot.text().replace(',', '.'))
             float(self.win_values.txt_corr.text().replace(',', '.'))
         except ValueError:
+            self.win_run.set_running_state(False)
             self.show_toast("Ошибка в числовых параметрах ввода!", "ERROR")
             return
 
@@ -2230,7 +3583,11 @@ class CompanionModeManager:
 
         self.win_run.set_running_state(True)
         if hasattr(self.main_win, 'run_calculation'):
-            self.main_win.run_calculation()
+            try:
+                self.main_win.run_calculation()
+            except Exception as e:
+                self.win_run.set_running_state(False)
+                self.show_toast(f"Ошибка: {e}", "ERROR")
 
     def on_calculation_finished(self, success: bool, message: str):
         """Обработка завершения расчета и вывод статуса прямо в режиме набивки."""

@@ -25,8 +25,8 @@ from services.updater_service import (
 class TestUpdaterService(unittest.TestCase):
     """Тестирование парсинга версий и логики обновлений."""
 
-    def test_app_version_is_1_2_1(self):
-        self.assertEqual(APP_VERSION, "1.2.12")
+    def test_app_version_is_1_3_0(self):
+        self.assertEqual(APP_VERSION, "1.3.0")
 
     def test_version_parsing(self):
         self.assertEqual(parse_version("1.0.0"), (1, 0, 0))

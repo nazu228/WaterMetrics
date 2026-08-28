@@ -38,27 +38,35 @@ class LogsPage(QWidget):
 
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("🔍 Поиск по логам...")
-        self.search_edit.setMinimumHeight(32)
+        self.search_edit.setMinimumHeight(34)
+        self.search_edit.setStyleSheet("font-size: 13.5px;")
         self.search_edit.textChanged.connect(self._filter_logs_display)
 
         self.chk_info = QCheckBox("INFO")
+        self.chk_info.setStyleSheet("font-size: 13px; font-weight: bold;")
         self.chk_info.setChecked(True)
         self.chk_info.toggled.connect(self._filter_logs_display)
 
         self.chk_success = QCheckBox("SUCCESS")
+        self.chk_success.setStyleSheet("font-size: 13px; font-weight: bold;")
         self.chk_success.setChecked(True)
         self.chk_success.toggled.connect(self._filter_logs_display)
 
         self.chk_error = QCheckBox("ERROR")
+        self.chk_error.setStyleSheet("font-size: 13px; font-weight: bold;")
         self.chk_error.setChecked(True)
         self.chk_error.toggled.connect(self._filter_logs_display)
 
         btn_export_log = QPushButton("Экспорт в файл", objectName="SecondaryButton")
         btn_export_log.setIcon(get_svg_icon("save"))
+        btn_export_log.setMinimumHeight(34)
+        btn_export_log.setStyleSheet("font-size: 13px; font-weight: 600;")
         btn_export_log.clicked.connect(self._export_logs)
 
         btn_clear_log = QPushButton("Очистить", objectName="SecondaryButton")
         btn_clear_log.setIcon(get_svg_icon("trash"))
+        btn_clear_log.setMinimumHeight(34)
+        btn_clear_log.setStyleSheet("font-size: 13px; font-weight: 600;")
         btn_clear_log.clicked.connect(self._clear_logs)
 
         filter_layout.addWidget(self.search_edit, 1)
@@ -73,6 +81,7 @@ class LogsPage(QWidget):
         # Консоль
         self.log_viewer = QTextEdit()
         self.log_viewer.setObjectName("LogViewer")
+        self.log_viewer.setStyleSheet("font-family: 'Consolas', 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.4;")
         self.log_viewer.setReadOnly(True)
         self.log_viewer.document().setMaximumBlockCount(5000)
 

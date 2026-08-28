@@ -10,6 +10,8 @@ import sys
 import unittest
 import time
 import numpy as np
+import openpyxl
+from core.excel_parser import ExcelManager
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
@@ -655,6 +657,236 @@ class TestStrikethroughAndValidation(unittest.TestCase):
                     cell = ws_res.cell(r, col_idx)
                     self.assertFalse(bool(cell.font and cell.font.strike), f"Cell {cell.coordinate} must NOT be striked")
 
+    def test_companion_house_switch_arcus_sync(self):
+        """Проверка: при смене дома Аркус автоматически обновляется или сбрасывается при несовпадении."""
+        w_files = AuthenticFilesWindow()
+        w_files.tpl_path = "C:/Docs/Шаблон_Ленина_10_январь.xlsx"
+        w_files.arc_path = "C:/Docs/Аркус_Ленина_10_февраль.xlsx"
+        w_files.drop_tpl.set_file_path(w_files.tpl_path, notify=False)
+        w_files.drop_arc.set_file_path(w_files.arc_path, notify=False)
+
+        # Переключаем дом на Гагарина 5 (где нет авто-найденного Аркуса)
+        new_tpl = "C:/Docs/Шаблон_Гагарина_5_январь.xlsx"
+        w_files.set_template_path(new_tpl)
+        self.assertEqual(w_files.tpl_path, new_tpl)
+        # Старый Аркус от Ленина 10 должен быть очищен
+        self.assertEqual(w_files.arc_path, "")
+        self.assertEqual(w_files.drop_arc.file_path, "")
+
+    def test_companion_run_cancel_resets_button_state(self):
+        """Проверка: отмена/ранний выход расчета разблокирует кнопку запуска и сбрасывает статус."""
+        w_run = AuthenticRunWindow()
+        w_run.set_running_state(True)
+        self.assertFalse(w_run.btn_run.isEnabled())
+        self.assertIn("Выполняется", w_run.btn_run.text())
+
+        # Завершение / отмена расчета
+        w_run.set_running_state(False)
+        self.assertTrue(w_run.btn_run.isEnabled())
+        self.assertIn("Сформировать", w_run.btn_run.text())
+
+    def test_light_theme_styles_consistency(self):
+        """Проверка: в светлых темах стили карточек и кнопок набивки не содержат темных фонов."""
+        from ui.styles import ThemeManager
+        from ui.about_page import AboutPage
+        from ui.components.interactive import ExcelDropZone
+
+        prev_theme = ThemeManager.get_current_theme_name()
+        try:
+            ThemeManager.apply_theme("Pearl Light")
+            drop = ExcelDropZone("Шаблон")
+            drop.set_highlight_state("linked", "✓ Шаблон.xlsx")
+            self.assertNotIn("15, 23, 42", drop.styleSheet())
+
+            about = AboutPage()
+            about.update_theme_elements("Pearl Light")
+            self.assertNotIn("#0B1736", about.info_card.styleSheet())
+        finally:
+            ThemeManager.apply_theme(prev_theme or "Dark Tech Azure")
+
+    def test_all_themes_companion_consistency(self):
+        """Проверка: все 6 тем корректно применяются ко всем карточкам режима набивки."""
+        from ui.styles import ThemeManager
+        from ui.components.companion_dock import (
+            CompanionTopSettingsBar, AuthenticFilesWindow,
+            AuthenticValuesWindow, AuthenticHistoryWindow,
+            AuthenticRunWindow, CompanionMiniFloater
+        )
+
+        prev_theme = ThemeManager.get_current_theme_name()
+        try:
+            for theme_name in ThemeManager.get_theme_names():
+                ThemeManager.apply_theme(theme_name)
+                
+                top_bar = CompanionTopSettingsBar()
+                top_bar.update_theme_assets(theme_name)
+                
+                files_win = AuthenticFilesWindow()
+                files_win.update_theme_assets(theme_name)
+                
+                val_win = AuthenticValuesWindow()
+                val_win.update_theme_assets(theme_name)
+                
+                hist_win = AuthenticHistoryWindow()
+                hist_win.update_theme_assets(theme_name)
+                
+                run_win = AuthenticRunWindow()
+                run_win.update_theme_assets(theme_name)
+                
+                floater = CompanionMiniFloater()
+                floater.update_theme_assets(theme_name)
+
+                if theme_name in ("Pearl Light", "Как дома"):
+                    self.assertNotIn("15, 23, 42", files_win.drop_tpl.styleSheet())
+                    self.assertNotIn("15, 23, 42", files_win.drop_arc.styleSheet())
+                else:
+                    self.assertIn("GlassCard", files_win.drop_tpl.styleSheet())
+        finally:
+            ThemeManager.apply_theme(prev_theme or "Dark Tech Azure")
+
+    def test_arcus_new_meter_readings_sync(self):
+        """Проверка: если счетчик отсутствовал в шаблоне (None), но появился в Аркусе, показания и суммы сходятся на 100%."""
+        wb_tpl = openpyxl.Workbook()
+        ws_tpl = wb_tpl.active
+        ws_tpl.title = "07.2026"
+        ws_tpl.append(["РЕЕСТР", "", "", "", "", "", ""])
+        ws_tpl.append(["Дом Тест", "", "", "", "", "", ""])
+        ws_tpl.append(["", "Холодная вода", "", "", "Горячая вода (ГВС)", "", ""])
+        ws_tpl.append(["", "№1", "", "", "№2", "", ""])
+        ws_tpl.append(["Лицевой", "Предыдущее", "Текущее", "Расход", "Предыдущее", "Текущее", "Расход"])
+        # Квартира 1: счетчик 1 заполнен, счетчик 2 пустой (None)
+        ws_tpl.append(["Квартира 1", 10.0, 15.0, 5.0, None, None, None])
+
+        tpl_path = os.path.join(BASE_DIR, "test_results", "test_tpl_new_meter.xlsx")
+        os.makedirs(os.path.dirname(tpl_path), exist_ok=True)
+        wb_tpl.save(tpl_path)
+
+        wb_arc = openpyxl.Workbook()
+        ws_arc = wb_arc.active
+        ws_arc.append([None, None, None, "Холодная вода", None, None, "Горячая вода (ГВС)", None, None])
+        ws_arc.append([None, None, None, "№1", None, None, "№1", None, None])
+        ws_arc.append([None, None, None, "Предыдущее", "Текущее", "Расход", "Предыдущее", "Текущее", "Расход"])
+        # В Аркусе по Квартире 1 появились показания на счетчике 2 (ГВС 1: 129.5 -> 130.0, расход 0.5)
+        ws_arc.append(["Квартира 1", "12345", "Иванов И.И.", 15.0, 20.0, 5.0, 129.5, 130.0, 0.5])
+
+        arc_path = os.path.join(BASE_DIR, "test_results", "test_arc_new_meter.xlsx")
+        wb_arc.save(arc_path)
+
+        mgr = ExcelManager()
+        wb, ws, meters, meter_by_type, all_rows, non_apartment_rows, name_col = mgr.extract_data(tpl_path, arc_path)
+
+        # Проверяем, что prev счетчика 2 подтянулся из Аркуса
+        self.assertEqual(all_rows['квартира 1']['prev'].get(('hot', 1)), 129.5)
+        self.assertEqual(all_rows['квартира 1']['consum'].get(('hot', 1)), 0.5)
+
+        res_path = os.path.join(BASE_DIR, "test_results", "test_res_new_meter.xlsx")
+        mgr.save_result(wb, ws, res_path, meters, all_rows, non_apartment_rows, name_col)
+
+        wb_res = openpyxl.load_workbook(res_path, data_only=True)
+        ws_res = wb_res.active
+
+        # Ищем строку Квартира 1 и Итого
+        apt_row = None
+        itogo_row = None
+        for r in range(1, ws_res.max_row + 1):
+            val = str(ws_res.cell(r, 1).value or '')
+            if 'квартира 1' in val.lower():
+                apt_row = r
+            elif 'итого' in val.lower():
+                itogo_row = r
+
+        self.assertIsNotNone(apt_row)
+        self.assertIsNotNone(itogo_row)
+
+        # Проверяем показания в строке квартиры
+        # ГВС 2 расход в колонке 7
+        self.assertEqual(ws_res.cell(apt_row, 5).value, 129.5)
+        self.assertEqual(ws_res.cell(apt_row, 6).value, 130.0)
+        self.assertEqual(ws_res.cell(apt_row, 7).value, 0.5)
+
+        # Проверяем, что сумма в Итого равна сумме строки
+        self.assertEqual(ws_res.cell(itogo_row, 7).value, 0.5)
+
+    def test_new_rows_from_arcus_highlighted_red_and_validated(self):
+        """Проверка: строки, появившиеся из Аркуса и отсутствовавшие в шаблоне, выделяются красным шрифтом и фиксируются валидатором."""
+        import openpyxl
+        from core.excel_parser import ExcelManager
+        from core.excel_validator import ExcelFormatValidator
+
+        wb_tpl = openpyxl.Workbook()
+        ws_tpl = wb_tpl.active
+        ws_tpl.title = "07.2026"
+        ws_tpl.append(["РЕЕСТР", "", "", "", "", "", ""])
+        ws_tpl.append(["Дом Тест Ред", "", "", "", "", "", ""])
+        ws_tpl.append(["", "Холодная вода", "", "", "Горячая вода (ГВС)", "", ""])
+        ws_tpl.append(["", "№1", "", "", "№1", "", ""])
+        ws_tpl.append(["Лицевой", "Предыдущее", "Текущее", "Расход", "Предыдущее", "Текущее", "Расход"])
+        # В шаблоне только Квартира 1
+        ws_tpl.append(["Квартира 1", 10.0, 15.0, 5.0, 20.0, 25.0, 5.0])
+
+        tpl_path = os.path.join(BASE_DIR, "test_results", "test_tpl_red_check.xlsx")
+        os.makedirs(os.path.dirname(tpl_path), exist_ok=True)
+        wb_tpl.save(tpl_path)
+
+        # В Аркусе есть Квартира 1 и новая Квартира 2
+        wb_arc = openpyxl.Workbook()
+        ws_arc = wb_arc.active
+        ws_arc.append([None, None, None, "Холодная вода", None, None, "Горячая вода (ГВС)", None, None])
+        ws_arc.append([None, None, None, "№1", None, None, "№1", None, None])
+        ws_arc.append([None, None, None, "Предыдущее", "Текущее", "Расход", "Предыдущее", "Текущее", "Расход"])
+        ws_arc.append(["Квартира 1", "111", "Иванов", 15.0, 20.0, 5.0, 25.0, 30.0, 5.0])
+        ws_arc.append(["Квартира 2", "222", "Петров", 50.0, 55.0, 5.0, 60.0, 65.0, 5.0])
+
+        arc_path = os.path.join(BASE_DIR, "test_results", "test_arc_red_check.xlsx")
+        wb_arc.save(arc_path)
+
+        mgr = ExcelManager()
+        wb, ws, meters, meter_by_type, all_rows, non_apartment_rows, name_col = mgr.extract_data(tpl_path, arc_path)
+
+        self.assertIn("квартира 1", all_rows)
+        self.assertIn("квартира 2", all_rows)
+        self.assertFalse(all_rows["квартира 1"].get("is_new_from_arcus", False))
+        self.assertTrue(all_rows["квартира 2"].get("is_new_from_arcus", False))
+
+        res_path = os.path.join(BASE_DIR, "test_results", "test_res_red_check.xlsx")
+        mgr.save_result(wb, ws, res_path, meters, all_rows, non_apartment_rows, name_col)
+
+        # Проверяем стили ячеек в сохраненном Excel файле
+        wb_res = openpyxl.load_workbook(res_path)
+        ws_res = wb_res.active
+
+        row_apt1 = None
+        row_apt2 = None
+        for r in range(1, ws_res.max_row + 1):
+            val = str(ws_res.cell(r, 1).value or '')
+            if 'квартира 1' in val.lower():
+                row_apt1 = r
+            elif 'квартира 2' in val.lower():
+                row_apt2 = r
+
+        self.assertIsNotNone(row_apt1, "Квартира 1 должна быть в таблице")
+        self.assertIsNotNone(row_apt2, "Квартира 2 должна быть в таблице")
+
+        # Квартира 1 была в шаблоне -> стандартный шрифт (не красный)
+        for c in range(1, ws_res.max_column + 1):
+            cell = ws_res.cell(row_apt1, c)
+            if cell.font and cell.font.color:
+                c_rgb = str(getattr(cell.font.color, 'rgb', '')).upper()
+                self.assertNotIn(c_rgb, ("FFFF0000", "FF0000", "00FF0000", "RED"))
+
+        # Квартира 2 отсутствовала в шаблоне -> красный шрифт
+        for c in range(1, ws_res.max_column + 1):
+            cell = ws_res.cell(row_apt2, c)
+            self.assertIsNotNone(cell.font, f"Ячейка {cell.coordinate} должна иметь шрифт")
+            self.assertIsNotNone(cell.font.color, f"Ячейка {cell.coordinate} должна иметь цвет шрифта")
+            c_rgb = str(getattr(cell.font.color, 'rgb', '')).upper()
+            self.assertIn(c_rgb, ("FFFF0000", "FF0000", "00FF0000", "RED"), f"Ячейка {cell.coordinate} должна быть красного цвета, получено {c_rgb}")
+
+        # Проверяем отчет валидатора
+        report = ExcelFormatValidator.validate_file(res_path, template_path=tpl_path)
+        new_row_issues = [i for i in report.issues if i.category == "new_row"]
+        self.assertGreaterEqual(len(new_row_issues), 1)
+        self.assertIn("Квартира 2", new_row_issues[0].message)
 
 
 if __name__ == "__main__":

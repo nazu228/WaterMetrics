@@ -57,21 +57,24 @@ class DetachableControlPanel(QFrame):
 
     def update_theme_assets(self, theme_name: str = None, theme_data: dict = None):
         accent = ThemeManager.get_current_accent_color()
-        self.lbl_grip.setStyleSheet(f"color: {accent}; font-weight: bold; font-size: 12px; background: transparent;")
-        self.btn_float_toggle.setIcon(get_svg_icon("folder", color=accent))
+        curr_theme = theme_name or ThemeManager.get_current_theme_name()
+        is_light = curr_theme in ("Pearl Light", "Как дома")
+        c_txt = "#0A246A" if curr_theme == "Как дома" else ("#028090" if is_light else accent)
+        self.lbl_grip.setStyleSheet(f"color: {c_txt}; font-weight: 800; font-size: 13px; background: transparent;")
+        self.btn_float_toggle.setIcon(get_svg_icon("folder", color=c_txt))
 
     def init_ui(self):
         self.main_layout = QHBoxLayout(self)
-        self.main_layout.setContentsMargins(10, 8, 10, 8)
-        self.main_layout.setSpacing(8)
+        self.main_layout.setContentsMargins(12, 8, 12, 8)
+        self.main_layout.setSpacing(10)
 
         # 1. Заголовок/Grip
         self.lbl_grip = QLabel("⚡ Панель:")
-        self.lbl_grip.setStyleSheet("color: #00F2FE; font-weight: bold; font-size: 12px; background: transparent;")
+        self.lbl_grip.setStyleSheet("color: #00F2FE; font-weight: 800; font-size: 13px; background: transparent;")
 
         # 2. Кнопка запуска (E2E-Контракт: btn_run)
         self.btn_run = QPushButton("Сформировать файл отчета", objectName="PrimaryButton")
-        self.btn_run.setIcon(get_svg_icon("run", color="#020617"))
+        self.btn_run.setIcon(get_svg_icon("run", color="#FFFFFF"))
         self.btn_run.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         # 3. Переключатель размера
@@ -103,21 +106,24 @@ class DetachableControlPanel(QFrame):
 
     def apply_size_mode(self):
         if self.size_mode == "compact":
-            h = 36
-            icon_sz = QSize(16, 16)
-            font_size = "11px"
+            h = 38
+            icon_sz = QSize(18, 18)
+            font_size = 12
         elif self.size_mode == "large":
-            h = 54
-            icon_sz = QSize(24, 24)
-            font_size = "14px"
+            h = 56
+            icon_sz = QSize(26, 26)
+            font_size = 16
         else:  # "standard"
-            h = 44
-            icon_sz = QSize(20, 20)
-            font_size = "13px"
+            h = 46
+            icon_sz = QSize(22, 22)
+            font_size = 14
 
         self.btn_run.setFixedHeight(h)
         self.btn_run.setIconSize(icon_sz)
-        self.btn_run.setStyleSheet(f"font-size: {font_size}; font-weight: bold;")
+        f = self.btn_run.font()
+        f.setPointSize(font_size)
+        f.setBold(True)
+        self.btn_run.setFont(f)
 
         self.btn_size_toggle.setFixedSize(h, h)
         self.btn_size_toggle.setIconSize(icon_sz)

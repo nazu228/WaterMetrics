@@ -32,9 +32,11 @@ from ui.dialogs.replacement_dialog import MeterReplacementDialog
 from ui.dialogs.command_palette import CommandPaletteDialog
 from ui.dialogs.welcome_dialog import WelcomeSetupDialog
 from ui.components.progress_overlay import CalculationProgressOverlay
-from ui.components.onboarding_overlay import OnboardingOverlay, OnboardingStep
 from ui.components.companion_dock import CompanionModeManager
 from ui.gl.ocean_widget import OceanWidget
+from services.folder_service import FolderNavigationService
+from ui.dialogs.file_guard_dialog import FileGuardDialog
+from ui.components.onboarding_overlay import OnboardingStep, OnboardingOverlay
 
 
 class CalculationWorker(QThread):
@@ -195,6 +197,8 @@ class CollapsibleSidebar(QFrame):
         main_win = self.window()
         if main_win:
             self.repaint_all_widgets(main_win)
+            if hasattr(main_win, 'companion_manager') and main_win.companion_manager:
+                main_win.companion_manager.update_theme_styles(theme_name)
 
     def repaint_all_widgets(self, parent_widget):
         parent_widget.update()
@@ -372,9 +376,9 @@ class MainWindow(QMainWindow):
             | Qt.WindowType.WindowMaximizeButtonHint
         )
         self.setMouseTracking(True)
-        self.resize(1120, 740)
+        self.resize(1200, 760)
         # Минимальный размер окна — предотвращает наслаивание панелей и уход текста за экран
-        self.setMinimumSize(900, 600)
+        self.setMinimumSize(880, 560)
 
         self.excel_manager = ExcelManager()
         self.closed_meters: List[ClosedMeterRecord] = []
@@ -597,6 +601,16 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'page_logs'):
             self.page_logs.append_log(f"Нормативы обновлены: ХВС={norm_cold:.3f} м³, ГВС={norm_hot:.3f} м³", "INFO")
 
+    def _cancel_or_abort_calculation(self, message: str = ""):
+        """Сброс состояния UI и разблокировка кнопок запуска при отмене или ошибке валидации."""
+        self.page_main.btn_run.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        self.status_label.setText("Готов к работе")
+        if hasattr(self, 'progress_overlay'):
+            self.progress_overlay.setVisible(False)
+        if hasattr(self, 'companion_manager') and self.companion_manager:
+            self.companion_manager.on_calculation_finished(False, message or "Расчет отменен")
+
     def run_calculation(self):
         if hasattr(self, 'calc_worker') and self.calc_worker and self.calc_worker.isRunning():
             ToastNotification.show_toast(self, "Расчет уже выполняется, пожалуйста, подождите...", "INFO")
@@ -607,8 +621,72 @@ class MainWindow(QMainWindow):
         sav = self.page_main.txt_save.text()
 
         if not tpl or not arc or not sav:
+            self._cancel_or_abort_calculation("Не указаны пути к файлам")
             ToastNotification.show_toast(self, "Укажите все пути к Excel файлам!", "ERROR")
             return
+
+        # 1. Защита от перезаписи исходников (Zero-Overwrite Shield)
+        if os.path.normpath(sav) == os.path.normpath(tpl):
+            self._cancel_or_abort_calculation("Путь сохранения совпадает с шаблоном")
+            target_parent = self if self.isVisible() else (getattr(self.companion_manager, 'win_files', self))
+            ToastNotification.show_toast(target_parent, "Путь сохранения совпадает с файлом шаблона! Перезапись исходника запрещена.", "ERROR")
+            return
+        if os.path.normpath(sav) == os.path.normpath(arc):
+            self._cancel_or_abort_calculation("Путь сохранения совпадает с Аркус")
+            target_parent = self if self.isVisible() else (getattr(self.companion_manager, 'win_files', self))
+            ToastNotification.show_toast(target_parent, "Путь сохранения совпадает с файлом Аркус!", "ERROR")
+            return
+
+        target_parent = self if self.isVisible() else (getattr(self.companion_manager, 'win_run', self))
+
+        # 2. Проверка блокировки итогового файла в Microsoft Excel
+        if FolderNavigationService.check_file_locked_by_excel(sav):
+            safe_copy_path = FolderNavigationService.generate_safe_copy_path(sav)
+            action = FileGuardDialog.show_excel_locked_dialog(
+                target_parent,
+                os.path.basename(sav),
+                os.path.basename(safe_copy_path)
+            )
+            if action == 'copy':
+                sav = safe_copy_path
+                self.page_main.txt_save.setText(sav)
+                if hasattr(self, 'companion_manager') and hasattr(self.companion_manager, 'win_files'):
+                    self.companion_manager.win_files.set_save_path(sav)
+                ToastNotification.show_toast(target_parent, f"Сохраняем как копию: {os.path.basename(sav)}", "INFO")
+            elif action == 'retry':
+                if FolderNavigationService.check_file_locked_by_excel(sav):
+                    self._cancel_or_abort_calculation("Файл заблокирован в Excel")
+                    ToastNotification.show_toast(target_parent, "Файл всё ещё заблокирован в Excel! Закройте его и повторите расчет.", "ERROR")
+                    return
+            else:
+                self._cancel_or_abort_calculation("Расчет отменен пользователем")
+                return
+
+        # 3. Проверка соответствия папки расчетного месяца Аркуса (строго следующий месяц)
+        month_val = FolderNavigationService.validate_arcus_month_folder(tpl, arc)
+        if not month_val["is_valid"]:
+            confirmed = FileGuardDialog.show_month_mismatch_dialog(
+                target_parent,
+                tpl_house=os.path.basename(tpl),
+                target_month_str=month_val["target_month_name"],
+                arc_month_str=month_val["arcus_month_name"] or "Неизвестно",
+                arc_path=arc
+            )
+            if not confirmed:
+                self._cancel_or_abort_calculation("Расчет отменен пользователем")
+                return
+
+        # 4. Кросс-чекинг совпадения дома шаблона и файла Аркус
+        tpl_house = os.path.basename(tpl)
+        arc_house = os.path.basename(arc)
+        if not FolderNavigationService.is_house_match(tpl_house, arc_house):
+            confirmed = FileGuardDialog.show_house_mismatch_dialog(
+                target_parent,
+                tpl_house, arc_house
+            )
+            if not confirmed:
+                self._cancel_or_abort_calculation("Расчет отменен пользователем")
+                return
 
         try:
             target_cold_val = float(self.page_main.txt_cold.text().replace(',', '.'))
@@ -620,6 +698,7 @@ class MainWindow(QMainWindow):
                 from services.settings_service import SettingsService
                 SettingsService.save_norms(norm_c_val, norm_h_val)
         except ValueError:
+            self._cancel_or_abort_calculation("Ошибка в числовых параметрах ввода")
             ToastNotification.show_toast(self, "Ошибка в числовых параметрах ввода!", "ERROR")
             return
 
@@ -743,6 +822,13 @@ class MainWindow(QMainWindow):
             if onboarding_done:
                 return
 
+        # Если находимся в режиме набивки, возвращаемся в главное окно
+        if hasattr(self, 'companion_manager') and self.companion_manager and self.companion_manager.is_companion_active:
+            self.companion_manager.exit_companion_mode()
+
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
         self.switch_page(0)
 
         steps = [
@@ -790,8 +876,8 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-        overlay_parent = self.ocean_bg if hasattr(self, 'ocean_bg') else self
-        self.onboarding_overlay = OnboardingOverlay(overlay_parent, steps)
+        self.onboarding_overlay = OnboardingOverlay(self, steps)
+        self.onboarding_overlay.setGeometry(self.rect())
         self.onboarding_overlay.demo_requested.connect(self.page_main.load_demo_data)
         self.onboarding_overlay.start()
 

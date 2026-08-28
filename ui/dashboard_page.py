@@ -18,7 +18,8 @@ import sys
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-    QFileDialog, QCheckBox, QApplication, QAbstractItemView, QSizePolicy
+    QFileDialog, QCheckBox, QApplication, QAbstractItemView, QSizePolicy,
+    QFrame, QComboBox
 )
 from PySide6.QtCore import Qt, QSettings, Slot, QPoint, QSize, QRect, QTimer, QUrl
 from PySide6.QtGui import (
@@ -35,6 +36,10 @@ from ui.components.glass_icon import GlassIconWidget
 from ui.styles import get_svg_icon, ThemeManager
 
 
+from services.folder_service import FolderNavigationService
+from ui.dialogs.file_guard_dialog import FileGuardDialog
+
+
 class DummyWaterGauge:
     """Заглушка гидро-индикатора для 100% E2E-совместимости с авто-тестами."""
     def set_level(self, pct: float):
@@ -48,25 +53,51 @@ class DummyWaterGauge:
 
 
 class SmartNumericLineEdit(QLineEdit):
-    """Кастомное умное числовое поле ввода с увеличенной клик-зоной, автовыделением, моноширинным шрифтом и визуальной валидацией."""
+    """Кастомное умное числовое поле ввода с увеличенной клик-зоной, автовыделением, моноширинным шрифтом, визуальной валидацией и поддержкой подсказок (ghost/suggested)."""
 
     def __init__(self, contents: str = "0.0", parent=None):
         super().__init__(contents, parent)
         self.linked_fields = []
-        self.setMinimumHeight(34)
+        self.is_suggested = False
+        self.setMinimumHeight(38)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._apply_base_style()
+        self.textChanged.connect(self._validate_input)
+        self._validate_input(self.text())
+
+    def _apply_base_style(self):
         self.setStyleSheet("""
             QLineEdit {
                 font-family: 'Consolas', 'JetBrains Mono', 'Segoe UI Mono', monospace;
-                font-size: 13px;
-                font-weight: 600;
-                padding-right: 12px;
+                font-size: 15px;
+                font-weight: 700;
+                padding-right: 14px;
                 letter-spacing: 0.5px;
             }
+            QLineEdit[suggested="true"] {
+                color: #64748B !important;
+                font-style: italic;
+            }
         """)
-        self.textChanged.connect(self._validate_input)
-        self._validate_input(self.text())
+
+    def set_suggested_value(self, val_str: str):
+        """Устанавливает значение как предложение (горит серым курсивом до подтверждения Enter)."""
+        self.is_suggested = True
+        self.setText(str(val_str))
+        self.setProperty("suggested", True)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.setToolTip("💡 Подставлено из таблицы импорта\nНажмите Enter для подтверждения или введите свое значение")
+
+    def commit_suggestion(self):
+        """Подтверждает предложенное значение, делая его активным нормальным цветом."""
+        if self.is_suggested:
+            self.is_suggested = False
+            self.setProperty("suggested", False)
+            self.style().unpolish(self)
+            self.style().polish(self)
+            self.setToolTip("")
 
     def _validate_input(self, text: str):
         val_str = text.strip().replace(',', '.')
@@ -84,7 +115,7 @@ class SmartNumericLineEdit(QLineEdit):
         self.style().polish(self)
         if not is_valid:
             self.setToolTip("⚠️ Ошибка ввода: значение должно быть положительным числом!")
-        else:
+        elif not self.is_suggested:
             self.setToolTip("")
 
     def focusInEvent(self, event):
@@ -98,8 +129,24 @@ class SmartNumericLineEdit(QLineEdit):
             QTimer.singleShot(0, self.selectAll)
 
     def keyPressEvent(self, event: QKeyEvent):
+        key = event.key()
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if self.is_suggested:
+                # Подтверждаем все связанные поля при нажатии Enter
+                for field in (self.linked_fields or [self]):
+                    if hasattr(field, 'commit_suggestion'):
+                        field.commit_suggestion()
+                from ui.components.toast import ToastNotification
+                ToastNotification.show_toast(self.window(), "Показания подтверждены", "SUCCESS")
+            super().keyPressEvent(event)
+            return
+
+        if self.is_suggested and event.text() and not (event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)):
+            # Пользователь начал вводить новое значение — сбрасываем статус подсказки
+            self.commit_suggestion()
+
         if event.matches(QKeySequence.StandardKey.Paste) or (
-            event.key() == Qt.Key.Key_V and (event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            key == Qt.Key.Key_V and (event.modifiers() & Qt.KeyboardModifier.ControlModifier)
         ):
             if self._handle_multi_paste():
                 event.accept()
@@ -112,17 +159,13 @@ class SmartNumericLineEdit(QLineEdit):
         if not clipboard_text:
             return False
 
-        # Нормализация переводов строк
         text = clipboard_text.replace('\r\n', '\n').replace('\r', '\n')
-        # Excel добавляет завершающий \n в конце выделенного диапазона
         if text.endswith('\n'):
             text = text[:-1]
 
-        # Проверяем, есть ли табличные разделители
         if '\t' not in text and '\n' not in text and ';' not in text:
             return False
 
-        # Разделяем по табам, переводам строк или точке с запятой, сохраняя пустые ячейки
         raw_tokens = re.split(r'[\t\n;]', text)
         if len(raw_tokens) <= 1:
             return False
@@ -130,7 +173,6 @@ class SmartNumericLineEdit(QLineEdit):
         tokens = []
         for t in raw_tokens:
             clean = t.strip().replace(',', '.')
-            # Пустая ячейка преобразуется в '0'
             if not clean:
                 tokens.append("0")
             else:
@@ -279,13 +321,12 @@ class ResizableMovableCard(HoverGlassCard):
                 return
         self._last_reflow_size = QSize(w, h)
 
-        # Объединённая система LOD (Level of Detail 1, 2, 3) + Layout Reflow
         if w >= 320 and h >= 140:
-            lod = 3  # LOD 3: Полноразмерный (Full Detailed)
+            lod = 3
         elif w >= 180 and h >= 80:
-            lod = 2  # LOD 2: Компактный (Compact Mode)
+            lod = 2
         else:
-            lod = 1  # LOD 1: Ультра-минималистичный (Micro Badge Mode)
+            lod = 1
 
         need_vertical = (w < 320) and (h > w * 0.85)
         self.is_vertical_layout = need_vertical
@@ -350,6 +391,7 @@ class MainDashboardPage(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.excel_manager = ExcelManager()
         self.cards = []
+        self.folder_ctx = {}
 
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         settings = QSettings("WaterMetrics", "Directories")
@@ -442,19 +484,107 @@ class MainDashboardPage(QWidget):
 
         # 1. КАРТОЧКА ФАЙЛОВ
         self.card_files = ResizableMovableCard("CardFiles", self.canvas)
-        self.card_files.setMinimumSize(320, 180)
+        self.card_files.setMinimumSize(300, 180)
         self.cards.append(self.card_files)
 
         self.grid_files = QGridLayout(self.card_files)
-        self.grid_files.setContentsMargins(12, 12, 12, 12)
-        self.grid_files.setSpacing(8)
+        self.grid_files.setContentsMargins(8, 8, 8, 8)
+        self.grid_files.setSpacing(6)
 
-        self.drop_tpl = ExcelDropZone("Файл Шаблона", "Перетащите файл шаблона")
+        # ─── Умная плашка навигации по месяцам и домам (встроена безшовно в карточку файлов) ───
+        self.smart_nav_frame = QFrame(self.card_files)
+        self.smart_nav_frame.setObjectName("SmartNavFrame")
+        self.smart_nav_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.smart_nav_frame.setStyleSheet("""
+            QFrame#SmartNavFrame {
+                background: rgba(0, 242, 254, 0.06);
+                border: 1.5px solid rgba(0, 242, 254, 0.25);
+                border-radius: 8px;
+                padding: 4px 8px;
+            }
+        """)
+        self.smart_nav_frame.setVisible(False)
+        nav_lay = QVBoxLayout(self.smart_nav_frame)
+        nav_lay.setContentsMargins(6, 4, 6, 4)
+        nav_lay.setSpacing(4)
+
+        nav_top_row = QHBoxLayout()
+        nav_top_row.setSpacing(8)
+
+        self.lbl_smart_context = QLabel("")
+        accent = ThemeManager.get_current_accent_color()
+        self.lbl_smart_context.setStyleSheet(f"font-size: 13px; font-weight: 800; color: {accent}; background: transparent;")
+        nav_top_row.addWidget(self.lbl_smart_context, 1)
+
+        self.lbl_switch_house = QLabel("Дом:")
+        self.lbl_switch_house.setStyleSheet("font-size: 12px; font-weight: 600; color: #94A3B8; background: transparent;")
+        self.combo_houses = QComboBox()
+        self.combo_houses.setFixedHeight(28)
+        self.combo_houses.setMinimumWidth(160)
+        self.combo_houses.setStyleSheet("""
+            QComboBox {
+                font-size: 12px;
+                font-weight: 600;
+                padding: 2px 6px;
+                border-radius: 6px;
+            }
+        """)
+        self.combo_houses.currentIndexChanged.connect(self._on_house_combo_changed)
+        nav_top_row.addWidget(self.lbl_switch_house)
+        nav_top_row.addWidget(self.combo_houses)
+        nav_lay.addLayout(nav_top_row)
+
+        self.nav_actions_widget = QWidget()
+        nav_actions_row = QHBoxLayout(self.nav_actions_widget)
+        nav_actions_row.setContentsMargins(0, 0, 0, 0)
+        nav_actions_row.setSpacing(8)
+
+        self.btn_auto_arcus = QPushButton("")
+        self.btn_auto_arcus.setIcon(get_svg_icon("sparkles", color="#00F2FE"))
+        self.btn_auto_arcus.setFixedHeight(28)
+        self.btn_auto_arcus.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_auto_arcus.setStyleSheet("""
+            QPushButton {
+                background: rgba(0, 242, 254, 0.14);
+                border: 1.5px solid rgba(0, 242, 254, 0.40);
+                color: #00F2FE;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 2px 10px;
+            }
+            QPushButton:hover {
+                background: rgba(0, 242, 254, 0.28);
+                border-color: #00F2FE;
+                color: #FFFFFF;
+            }
+        """)
+        self.btn_auto_arcus.setVisible(False)
+        self.btn_auto_arcus.clicked.connect(self._on_auto_arcus_clicked)
+        nav_actions_row.addWidget(self.btn_auto_arcus)
+
+        self.lbl_exist_alert = QLabel("")
+        self.lbl_exist_alert.setWordWrap(False)
+        self.lbl_exist_alert.setStyleSheet("""
+            color: #FBBF24;
+            font-size: 12px;
+            font-weight: 700;
+            background: rgba(245, 158, 11, 0.12);
+            border: 1px solid rgba(245, 158, 11, 0.30);
+            border-radius: 4px;
+            padding: 2px 8px;
+        """)
+        self.lbl_exist_alert.setVisible(False)
+        nav_actions_row.addWidget(self.lbl_exist_alert, 1)
+
+        nav_lay.addWidget(self.nav_actions_widget)
+
+        self.drop_tpl = ExcelDropZone("Файл Шаблона", "Перетащите файл шаблона или кликните")
         self.drop_tpl.get_initial_dir = lambda: self.last_template_dir
         self.drop_tpl.get_dialog_title = self._get_template_dialog_title
         self.drop_tpl.file_dropped.connect(self._on_template_selected)
 
-        self.drop_arc = ExcelDropZone("Файл Аркус", "Перетащите файл Аркус")
+        self.drop_arc = ExcelDropZone("Файл Аркус", "Перетащите файл Аркус или кликните")
         self.drop_arc.get_initial_dir = lambda: self.last_arcus_dir
         self.drop_arc.get_dialog_title = self._get_arcus_dialog_title
         self.drop_arc.file_dropped.connect(self._on_arcus_selected)
@@ -465,44 +595,50 @@ class MainDashboardPage(QWidget):
         save_layout.setSpacing(8)
 
         self.lbl_save = QLabel("Сохранить:", objectName="FieldLabel")
+        self.lbl_save.setFixedHeight(36)
+        self.lbl_save.setStyleSheet("font-size: 13.5px; font-weight: 600;")
         self.txt_save = QLineEdit()
         self.txt_save.setPlaceholderText("Путь к итоговому файлу...")
         self.txt_save.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.txt_save.setMinimumHeight(32)
+        self.txt_save.setFixedHeight(36)
 
-        self.btn_browse_save = QPushButton("Обзор...", objectName="SecondaryButton")
+        self.btn_browse_save = QPushButton("Обзор", objectName="SecondaryButton")
         self.btn_browse_save.setIcon(get_svg_icon("folder"))
-        self.btn_browse_save.setMinimumHeight(32)
+        self.btn_browse_save.setFixedHeight(36)
+        self.btn_browse_save.setMinimumWidth(85)
         self.btn_browse_save.clicked.connect(self._browse_save_path)
+
+        self.btn_repl = QPushButton("Замены ИПУ", objectName="AccentButton")
+        self.btn_repl.setIcon(get_svg_icon("replace"))
+        self.btn_repl.setFixedHeight(36)
+        self.btn_repl.setMinimumWidth(125)
+        self.btn_repl.setToolTip("Мастер замен счетчиков ИПУ")
+        self.btn_repl.clicked.connect(self._open_replacement_master)
 
         save_layout.addWidget(self.lbl_save)
         save_layout.addWidget(self.txt_save, 1)
         save_layout.addWidget(self.btn_browse_save)
-
-        self.btn_repl = QPushButton("Мастер замен счетчиков", objectName="AccentButton")
-        self.btn_repl.setIcon(get_svg_icon("replace"))
-        self.btn_repl.setMinimumHeight(34)
-        self.btn_repl.clicked.connect(self._open_replacement_master)
+        save_layout.addWidget(self.btn_repl)
 
         # Компактные кнопки
         self.btn_compact_tpl = QPushButton("Шаблон", objectName="SecondaryButton")
         self.btn_compact_tpl.setIcon(get_svg_icon("folder"))
-        self.btn_compact_tpl.setMinimumHeight(30)
+        self.btn_compact_tpl.setFixedHeight(30)
         self.btn_compact_tpl.clicked.connect(self.drop_tpl.open_file_dialog)
 
         self.btn_compact_arc = QPushButton("Аркус", objectName="SecondaryButton")
         self.btn_compact_arc.setIcon(get_svg_icon("folder"))
-        self.btn_compact_arc.setMinimumHeight(30)
+        self.btn_compact_arc.setFixedHeight(30)
         self.btn_compact_arc.clicked.connect(self.drop_arc.open_file_dialog)
 
         self.btn_compact_save = QPushButton("Сохранение", objectName="SecondaryButton")
         self.btn_compact_save.setIcon(get_svg_icon("folder"))
-        self.btn_compact_save.setMinimumHeight(30)
+        self.btn_compact_save.setFixedHeight(30)
         self.btn_compact_save.clicked.connect(self._browse_save_path)
 
         self.btn_compact_repl = QPushButton("Замена", objectName="AccentButton")
         self.btn_compact_repl.setIcon(get_svg_icon("replace"))
-        self.btn_compact_repl.setMinimumHeight(30)
+        self.btn_compact_repl.setMinimumHeight(32)
         self.btn_compact_repl.clicked.connect(self._open_replacement_master)
 
         ThemeManager.on_theme_changed.append(self._update_theme_assets)
@@ -514,17 +650,28 @@ class MainDashboardPage(QWidget):
         self.cards.append(self.card_targets)
 
         self.grid_targets = QGridLayout(self.card_targets)
-        self.grid_targets.setContentsMargins(12, 12, 12, 12)
-        self.grid_targets.setSpacing(8)
+        self.grid_targets.setContentsMargins(14, 14, 14, 14)
+        self.grid_targets.setSpacing(10)
 
         self.lbl_cold = QLabel("ХВС:", objectName="FieldLabel")
+        self.lbl_cold.setStyleSheet("font-size: 14px; font-weight: 700;")
         self.txt_cold = SmartNumericLineEdit("0.0")
 
         self.lbl_hot = QLabel("ГВС:", objectName="FieldLabel")
+        self.lbl_hot.setStyleSheet("font-size: 14px; font-weight: 700;")
         self.txt_hot = SmartNumericLineEdit("0.0")
 
         self.lbl_corr = QLabel("ДОБ.:", objectName="FieldLabel")
+        self.lbl_corr.setStyleSheet("font-size: 14px; font-weight: 700;")
         self.txt_corr = SmartNumericLineEdit("0.0")
+
+        # Кнопка импорта показаний из внешней таблицы
+        self.btn_import_values = QPushButton("📥 Из таблицы", objectName="SecondaryButton")
+        self.btn_import_values.setIcon(get_svg_icon("sparkles"))
+        self.btn_import_values.setFixedHeight(34)
+        self.btn_import_values.setToolTip("Импорт ХВС/ГВС/ДОБ из набивочной таблицы Excel")
+        self.btn_import_values.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_import_values.clicked.connect(self._open_import_dialog)
 
         numeric_chain = [self.txt_cold, self.txt_hot, self.txt_corr]
         for field in numeric_chain:
@@ -545,17 +692,18 @@ class MainDashboardPage(QWidget):
         self.cards.append(self.card_hist)
 
         self.layout_hist = QVBoxLayout(self.card_hist)
-        self.layout_hist.setContentsMargins(12, 12, 12, 12)
-        self.layout_hist.setSpacing(8)
+        self.layout_hist.setContentsMargins(14, 14, 14, 14)
+        self.layout_hist.setSpacing(10)
 
         self.lbl_hist_title = QLabel("История сгенерированных отчетов", objectName="SectionTitle")
+        self.lbl_hist_title.setStyleSheet("font-size: 15.5px; font-weight: 700;")
         self.layout_hist.addWidget(self.lbl_hist_title)
 
         self.table_hist = QTableWidget(0, 2)
         self.table_hist.setHorizontalHeaderLabels(["Имя файла", "Полный путь"])
         self.table_hist.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table_hist.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.table_hist.horizontalHeader().setFixedHeight(30)
+        self.table_hist.horizontalHeader().setFixedHeight(32)
         self.table_hist.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         self.table_hist.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table_hist.verticalHeader().setVisible(False)
@@ -566,22 +714,27 @@ class MainDashboardPage(QWidget):
         self.layout_hist.addWidget(self.table_hist, 1)
 
         self.layout_hist_btns = QHBoxLayout()
-        self.layout_hist_btns.setSpacing(8)
+        self.layout_hist_btns.setSpacing(6)
 
         self.btn_hist_open = QPushButton("Открыть", objectName="SecondaryButton")
         self.btn_hist_open.setIcon(get_svg_icon("folder"))
+        self.btn_hist_open.setFixedHeight(34)
         self.btn_hist_open.clicked.connect(self._open_selected_history_file)
 
         self.btn_hist_show_folder = QPushButton("В папку", objectName="SecondaryButton")
         self.btn_hist_show_folder.setIcon(get_svg_icon("folder"))
+        self.btn_hist_show_folder.setFixedHeight(34)
         self.btn_hist_show_folder.clicked.connect(self._show_selected_in_folder)
 
         self.btn_hist_clr = QPushButton("Удалить", objectName="SecondaryButton")
         self.btn_hist_clr.setIcon(get_svg_icon("trash"))
+        self.btn_hist_clr.setFixedHeight(34)
         self.btn_hist_clr.clicked.connect(self._remove_selected_history_entries)
 
-        self.btn_hist_clear_all = QPushButton("Очистить всё", objectName="DangerButton")
-        self.btn_hist_clear_all.setIcon(get_svg_icon("trash", color="#F87171"))
+        self.btn_hist_clear_all = QPushButton("Очистить", objectName="DangerButton")
+        self.btn_hist_clear_all.setIcon(get_svg_icon("trash", color="#EF4444"))
+        self.btn_hist_clear_all.setFixedHeight(34)
+        self.btn_hist_clear_all.setToolTip("Очистить всю историю отчетов")
         self.btn_hist_clear_all.clicked.connect(self._clear_all_history_entries)
 
         self.layout_hist_btns.addWidget(self.btn_hist_open)
@@ -622,6 +775,10 @@ class MainDashboardPage(QWidget):
         kpi_lay.setContentsMargins(0, 0, 0, 0)
         kpi_lay.setSpacing(10)
         accent = ThemeManager.get_current_accent_color()
+        curr_theme = ThemeManager.get_current_theme_name()
+        is_light = curr_theme in ("Pearl Light", "Как дома")
+        title_color = "#475569" if is_light else "#94A3B8"
+        val_color = "#0A246A" if curr_theme == "Как дома" else ("#028090" if curr_theme == "Pearl Light" else accent)
 
         kpi_data = [
             ("📊 Отчетов за месяц", "lbl_kpi_reports", "0"),
@@ -632,16 +789,16 @@ class MainDashboardPage(QWidget):
 
         for title_str, attr_name, default_val in kpi_data:
             card = HoverGlassCard()
-            card.setFixedHeight(50)
+            card.setFixedHeight(54)
             c_lay = QVBoxLayout(card)
-            c_lay.setContentsMargins(12, 6, 12, 6)
+            c_lay.setContentsMargins(14, 6, 14, 6)
             c_lay.setSpacing(2)
 
             lbl_t = QLabel(title_str)
-            lbl_t.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 600;")
+            lbl_t.setStyleSheet(f"color: {title_color}; font-size: 11.5px; font-weight: 600; background: transparent;")
 
             lbl_v = QLabel(default_val)
-            lbl_v.setStyleSheet(f"color: {accent}; font-size: 13px; font-weight: 700;")
+            lbl_v.setStyleSheet(f"color: {val_color}; font-size: 14px; font-weight: 800; background: transparent;")
             setattr(self, attr_name, lbl_v)
 
             c_lay.addWidget(lbl_t)
@@ -652,9 +809,12 @@ class MainDashboardPage(QWidget):
 
     def _update_kpi_metrics(self):
         accent = ThemeManager.get_current_accent_color()
+        curr_theme = ThemeManager.get_current_theme_name()
+        val_color = "#0A246A" if curr_theme == "Как дома" else ("#028090" if curr_theme == "Pearl Light" else accent)
+
         if hasattr(self, 'lbl_kpi_reports') and hasattr(self, 'table_hist'):
             self.lbl_kpi_reports.setText(str(self.table_hist.rowCount()))
-            self.lbl_kpi_reports.setStyleSheet(f"color: {accent}; font-size: 13px; font-weight: 700;")
+            self.lbl_kpi_reports.setStyleSheet(f"color: {val_color}; font-size: 14px; font-weight: 800; background: transparent;")
 
         if hasattr(self, 'lbl_kpi_volume'):
             try:
@@ -662,7 +822,7 @@ class MainDashboardPage(QWidget):
                 h_val = float(self.txt_hot.text().replace(',', '.')) if self.txt_hot.text() else 0.0
                 tot = c_val + h_val
                 self.lbl_kpi_volume.setText(f"{tot:.2f} м³")
-                self.lbl_kpi_volume.setStyleSheet(f"color: {accent}; font-size: 13px; font-weight: 700;")
+                self.lbl_kpi_volume.setStyleSheet(f"color: {val_color}; font-size: 14px; font-weight: 800; background: transparent;")
             except ValueError:
                 pass
 
@@ -671,18 +831,18 @@ class MainDashboardPage(QWidget):
             closed_cnt = len(getattr(parent_win, 'closed_meters', []))
             self.lbl_kpi_meters.setText(f"{closed_cnt} шт")
             if closed_cnt == 0:
-                self.lbl_kpi_meters.setStyleSheet("color: #94A3B8; font-size: 13px; font-weight: 700;")
+                self.lbl_kpi_meters.setStyleSheet("color: #94A3B8; font-size: 14px; font-weight: 800; background: transparent;")
             else:
-                self.lbl_kpi_meters.setStyleSheet(f"color: {accent}; font-size: 13px; font-weight: 700;")
+                self.lbl_kpi_meters.setStyleSheet(f"color: {val_color}; font-size: 14px; font-weight: 800; background: transparent;")
 
         if hasattr(self, 'lbl_kpi_status'):
             tpl_path = getattr(self.drop_tpl, 'file_path', '')
             if tpl_path:
                 self.lbl_kpi_status.setText("● Файл загружен")
-                self.lbl_kpi_status.setStyleSheet("color: #10B981; font-size: 13px; font-weight: 700;")
+                self.lbl_kpi_status.setStyleSheet("color: #10B981; font-size: 14px; font-weight: 800; background: transparent;")
             else:
                 self.lbl_kpi_status.setText("● Ожидание файлов")
-                self.lbl_kpi_status.setStyleSheet(f"color: {accent}; font-size: 13px; font-weight: 700;")
+                self.lbl_kpi_status.setStyleSheet(f"color: {val_color}; font-size: 14px; font-weight: 800; background: transparent;")
 
     def _show_history_context_menu(self, pos: QPoint):
         from PySide6.QtWidgets import QMenu
@@ -740,6 +900,10 @@ class MainDashboardPage(QWidget):
             self.btn_repl.setIcon(get_svg_icon("replace", color=accent))
         if hasattr(self, 'btn_compact_repl'):
             self.btn_compact_repl.setIcon(get_svg_icon("replace", color=accent))
+        if hasattr(self, 'lbl_smart_context'):
+            is_light = t_name in ("Pearl Light", "Как дома")
+            c_txt = "#0A246A" if t_name == "Как дома" else ("#028090" if is_light else "#00F2FE")
+            self.lbl_smart_context.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {c_txt}; background: transparent;")
         self._update_file_linking_status()
         self._update_kpi_metrics()
 
@@ -758,6 +922,9 @@ class MainDashboardPage(QWidget):
 
         if lod == 1:
             # LOD 1: Ultra-Minimalist Badge Mode (Микро-иконки + минимализм)
+            if hasattr(self, 'smart_nav_frame'):
+                self.smart_nav_frame.setVisible(False)
+
             self.drop_tpl.setVisible(False)
             self.drop_arc.setVisible(False)
             self.save_container.setVisible(False)
@@ -792,6 +959,9 @@ class MainDashboardPage(QWidget):
 
         elif lod == 2:
             # LOD 2: Compact Mode
+            if hasattr(self, 'smart_nav_frame'):
+                self.smart_nav_frame.setVisible(False)
+
             self.drop_tpl.setVisible(False)
             self.drop_arc.setVisible(False)
             self.save_container.setVisible(False)
@@ -829,19 +999,49 @@ class MainDashboardPage(QWidget):
             self.drop_tpl.set_compact_mode(False)
             self.drop_arc.set_compact_mode(False)
 
+            has_ctx = bool(self.folder_ctx and self.folder_ctx.get("template_path"))
+            if hasattr(self, 'smart_nav_frame'):
+                self.smart_nav_frame.setVisible(has_ctx)
+
             self.grid_files.setContentsMargins(12, 12, 12, 12)
             self.grid_files.setSpacing(8)
 
-            if need_vertical:
-                self.grid_files.addWidget(self.drop_tpl, 0, 0, 1, 2)
-                self.grid_files.addWidget(self.drop_arc, 1, 0, 1, 2)
-                self.grid_files.addWidget(self.save_container, 2, 0, 1, 2)
-                self.grid_files.addWidget(self.btn_repl, 3, 0, 1, 2)
+            row = 0
+            if hasattr(self, 'smart_nav_frame'):
+                self.grid_files.addWidget(self.smart_nav_frame, row, 0, 1, 2)
+                row += 1
+
+            w = self.card_files.width()
+            if w < 340:
+                self.lbl_save.setText("Сохр.:")
+                self.btn_browse_save.setText("")
+                self.btn_browse_save.setToolTip("Обзор файла сохранения")
+                self.btn_repl.setText("")
+                self.btn_repl.setToolTip("Мастер замен ИПУ")
+            elif w < 460:
+                self.lbl_save.setText("Сохранить:")
+                self.btn_browse_save.setText("Обзор")
+                self.btn_browse_save.setToolTip("Обзор файла сохранения")
+                self.btn_repl.setText("Замены")
+                self.btn_repl.setToolTip("Мастер замен ИПУ")
             else:
-                self.grid_files.addWidget(self.drop_tpl, 0, 0, 1, 1)
-                self.grid_files.addWidget(self.drop_arc, 0, 1, 1, 1)
-                self.grid_files.addWidget(self.save_container, 1, 0, 1, 2)
-                self.grid_files.addWidget(self.btn_repl, 2, 0, 1, 2)
+                self.lbl_save.setText("Сохранить:")
+                self.btn_browse_save.setText("Обзор")
+                self.btn_browse_save.setToolTip("Выбрать путь для сохранения")
+                self.btn_repl.setText("Замены ИПУ")
+                self.btn_repl.setToolTip("Мастер замен счетчиков ИПУ")
+
+            if need_vertical:
+                self.grid_files.addWidget(self.drop_tpl, row, 0, 1, 2)
+                row += 1
+                self.grid_files.addWidget(self.drop_arc, row, 0, 1, 2)
+                row += 1
+                self.grid_files.addWidget(self.save_container, row, 0, 1, 2)
+            else:
+                self.grid_files.addWidget(self.drop_tpl, row, 0, 1, 1)
+                self.grid_files.addWidget(self.drop_arc, row, 1, 1, 1)
+                row += 1
+                self.grid_files.addWidget(self.save_container, row, 0, 1, 2)
 
     def _reflow_targets_card(self, need_vertical: bool = False, lod: int = 3):
         while self.grid_targets.count() > 0:
@@ -873,29 +1073,37 @@ class MainDashboardPage(QWidget):
         self.grid_targets.addWidget(self.txt_hot, 1, 1)
         self.grid_targets.addWidget(self.lbl_corr, 2, 0)
         self.grid_targets.addWidget(self.txt_corr, 2, 1)
+        if lod >= 2:
+            self.btn_import_values.setVisible(True)
+            self.grid_targets.addWidget(self.btn_import_values, 3, 0, 1, 2)
+        else:
+            self.btn_import_values.setVisible(False)
 
     def _reflow_hist_card(self, need_vertical: bool = False, lod: int = 3):
         w = self.card_hist.width()
 
-        if lod == 3 and w > 380:
-            self.lbl_hist_title.setText("История сгенерированных отчетов")
-            self.btn_hist_open.setText("Открыть")
-            self.btn_hist_show_folder.setText("В папку")
-            self.btn_hist_clr.setText("Удалить")
-            self.btn_hist_clear_all.setText("Очистить всё")
-            self.table_hist.horizontalHeader().setFixedHeight(30)
-            self.table_hist.setColumnWidth(0, max(260, int(w * 0.45)))
-            self.table_hist.setStyleSheet("")
-        elif lod == 2 or (300 <= w <= 380):
-            self.lbl_hist_title.setText("История отчетов")
+        if lod == 3 and w > 360:
+            self.lbl_hist_title.setText("История сгенерированных отчетов" if w > 420 else "История отчетов")
+            self.lbl_hist_title.setToolTip("История сгенерированных отчетов")
             self.btn_hist_open.setText("Открыть")
             self.btn_hist_show_folder.setText("В папку")
             self.btn_hist_clr.setText("Удалить")
             self.btn_hist_clear_all.setText("Очистить")
-            self.table_hist.setColumnWidth(0, max(160, int(w * 0.45)))
+            self.table_hist.horizontalHeader().setFixedHeight(28)
+            self.table_hist.setColumnWidth(0, max(200, int(w * 0.45)))
             self.table_hist.setStyleSheet("")
-        else:  # w < 320 (Icon-Only / Ultra-Compact)
-            self.lbl_hist_title.setText("История" if w < 300 else "История отчетов")
+        elif lod == 2 or (260 <= w <= 360):
+            self.lbl_hist_title.setText("История отчетов" if w > 300 else "История")
+            self.lbl_hist_title.setToolTip("История сгенерированных отчетов")
+            self.btn_hist_open.setText("Открыть")
+            self.btn_hist_show_folder.setText("Папка")
+            self.btn_hist_clr.setText("Удалить")
+            self.btn_hist_clear_all.setText("Очистить")
+            self.table_hist.setColumnWidth(0, max(140, int(w * 0.45)))
+            self.table_hist.setStyleSheet("")
+        else:  # w < 260 (Icon-Only / Ultra-Compact)
+            self.lbl_hist_title.setText("История")
+            self.lbl_hist_title.setToolTip("История сгенерированных отчетов")
 
             self.btn_hist_open.setText("")
             self.btn_hist_open.setToolTip("Открыть выделенные файлы")
@@ -911,7 +1119,7 @@ class MainDashboardPage(QWidget):
 
             self.btn_hist_clear_all.setText("")
             self.btn_hist_clear_all.setToolTip("Очистить всю историю отчетов")
-            self.btn_hist_clear_all.setIcon(get_svg_icon("trash", color="#F87171"))
+            self.btn_hist_clear_all.setIcon(get_svg_icon("trash", color="#EF4444"))
 
             self.table_hist.horizontalHeader().setFixedHeight(24)
             self.table_hist.setStyleSheet("QTableWidget::item { padding: 2px; } QHeaderView::section { height: 24px; padding: 2px; }")
@@ -925,10 +1133,9 @@ class MainDashboardPage(QWidget):
     def apply_default_positions(self):
         cw = max(800, self.canvas.width())
         ch = max(500, self.canvas.height())
-
-        self.card_files.rel_rect = (0.02, 0.02, 0.96, 0.44)
-        self.card_targets.rel_rect = (0.02, 0.48, 0.46, 0.49)
-        self.card_hist.rel_rect = (0.50, 0.48, 0.48, 0.49)
+        self.card_files.rel_rect = (0.02, 0.02, 0.96, 0.48)
+        self.card_targets.rel_rect = (0.02, 0.52, 0.46, 0.46)
+        self.card_hist.rel_rect = (0.50, 0.52, 0.48, 0.46)
 
         for card in self.cards:
             card.apply_rel_rect(QSize(cw, ch))
@@ -1011,34 +1218,196 @@ class MainDashboardPage(QWidget):
                 if hasattr(parent_win, 'companion_manager') and parent_win.companion_manager:
                     parent_win.companion_manager.update_replacements_badge()
 
-        out_dir = os.path.dirname(os.path.abspath(tpl_path))
+        out_dir = os.path.dirname(os.path.abspath(tpl_path)) if os.path.isfile(tpl_path) else os.path.abspath(tpl_path)
         self.last_template_dir = out_dir
         settings = QSettings("WaterMetrics", "Directories")
         settings.setValue("LastTemplateDir", out_dir)
 
-        out_filename = self.excel_manager.parse_house_and_next_month(tpl_path)
-        last_out_dir = settings.value("LastOutputDir", "", type=str)
+        # Автоматический анализ контекста папок, дома и следующего месяца
+        try:
+            self.folder_ctx = FolderNavigationService.detect_folder_context(tpl_path)
+            self._update_smart_navigation_ui()
 
-        if not last_out_dir:
-            last_out_dir = out_dir
+            sug_save = self.folder_ctx.get("suggested_save_path")
+            if sug_save:
+                self.txt_save.setText(sug_save)
+            else:
+                out_filename = self.excel_manager.parse_house_and_next_month(tpl_path)
+                last_out_dir = settings.value("LastOutputDir", "", type=str) or out_dir
+                full_save_path = os.path.join(last_out_dir, out_filename).replace('\\', '/')
+                self.txt_save.setText(full_save_path)
 
-        full_save_path = os.path.join(last_out_dir, out_filename).replace('\\', '/')
-        self.txt_save.setText(full_save_path)
+            found_arc = self.folder_ctx.get("found_arcus_path")
+            curr_arc = getattr(self.drop_arc, 'file_path', '')
+            house_id = self.folder_ctx.get("house_name") or os.path.basename(tpl_path)
+            if found_arc and os.path.exists(found_arc):
+                self.drop_arc.set_file_path(found_arc, notify=False)
+                self._on_arcus_selected(found_arc)
+            elif curr_arc:
+                arc_addr = FolderNavigationService.extract_house_name_from_arcus_content(curr_arc)
+                is_match = FolderNavigationService.is_house_match(house_id, os.path.basename(curr_arc)) or (arc_addr and FolderNavigationService.is_house_match(house_id, arc_addr))
+                if not is_match:
+                    self.drop_arc.clear_file()
+                    self._on_arcus_selected("")
+        except Exception:
+            pass
+
+        # Синхронизация с режимом набивки без рекурсии
+        if parent_win and hasattr(parent_win, 'companion_manager') and parent_win.companion_manager:
+            win_files = getattr(parent_win.companion_manager, 'win_files', None)
+            if win_files:
+                win_files.set_template_path(tpl_path)
+                if self.txt_save.text():
+                    win_files.set_save_path(self.txt_save.text())
 
         self._update_file_linking_status()
         self._update_kpi_metrics()
 
-    @Slot(str)
-    def _on_arcus_selected(self, arc_path: str):
-        if not arc_path:
+        # Авто-проверка кэша сессии импорта и установка серых подсказок
+        house_target = self.folder_ctx.get("house_name") if self.folder_ctx else ""
+        if not house_target and tpl_path:
+            house_target = self.excel_manager.extract_house_name(tpl_path)
+        if house_target:
+            self._check_and_apply_session_import_suggestions(house_target)
+
+    def _update_smart_navigation_ui(self):
+        ctx = self.folder_ctx
+        if not ctx or not ctx.get("template_path"):
+            self.smart_nav_frame.setVisible(False)
             return
 
-        out_dir = os.path.dirname(os.path.abspath(arc_path))
+        self.smart_nav_frame.setVisible(True)
+        house_name = ctx.get("house_name") or "Дом"
+        next_m_name = ctx.get("next_month_name") or "След. месяц"
+        next_y = ctx.get("next_year") or ""
+        self.lbl_smart_context.setText(f"🏢 {house_name}  ➔  Расчет на {next_m_name} {next_y}")
+        t_name = ThemeManager.get_current_theme_name()
+        accent = ThemeManager.get_current_accent_color()
+        is_light = t_name in ("Pearl Light", "Как дома")
+        c_txt = "#0A246A" if t_name == "Как дома" else ("#028090" if is_light else accent)
+        self.lbl_smart_context.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {c_txt}; background: transparent;")
+
+        # Обновляем список домов в папке
+        houses = ctx.get("available_houses", [])
+        self.combo_houses.blockSignals(True)
+        self.combo_houses.clear()
+        tpl_path = getattr(self.drop_tpl, 'file_path', '')
+        if len(houses) > 1:
+            for idx, h in enumerate(houses):
+                self.combo_houses.addItem(h["name"], h["path"])
+                if tpl_path and os.path.normpath(h["path"]) == os.path.normpath(tpl_path):
+                    self.combo_houses.setCurrentIndex(idx)
+            self.combo_houses.setVisible(True)
+            self.lbl_switch_house.setVisible(True)
+        else:
+            self.combo_houses.setVisible(False)
+            self.lbl_switch_house.setVisible(False)
+        self.combo_houses.blockSignals(False)
+
+        # Авто-найденный Аркус
+        found_arc = ctx.get("found_arcus_path")
+        arc_path = getattr(self.drop_arc, 'file_path', '')
+        has_auto_arcus = False
+        if found_arc and os.path.exists(found_arc) and (not arc_path or os.path.normpath(found_arc) != os.path.normpath(arc_path)):
+            arc_name = os.path.basename(found_arc)
+            arc_short = arc_name if len(arc_name) <= 22 else (arc_name[:19] + "...")
+            self.btn_auto_arcus.setText(f"⚡ Подключить Аркус ({arc_short})")
+            self.btn_auto_arcus.setToolTip(f"Нажмите для автоматического подключения:\n{found_arc}")
+            self.btn_auto_arcus.setVisible(True)
+            has_auto_arcus = True
+        else:
+            self.btn_auto_arcus.setVisible(False)
+
+        # Проверка существующего отчета
+        exist_info = ctx.get("existing_report_info")
+        has_exist_alert = False
+        if exist_info:
+            self.lbl_exist_alert.setText(f"⚠️ Отчет за {next_m_name} уже на диске")
+            self.lbl_exist_alert.setToolTip(f"В целевой папке уже найден отчет:\n{exist_info}")
+            self.lbl_exist_alert.setVisible(True)
+            has_exist_alert = True
+        else:
+            self.lbl_exist_alert.setVisible(False)
+
+        if hasattr(self, 'nav_actions_widget'):
+            self.nav_actions_widget.setVisible(has_auto_arcus or has_exist_alert)
+
+    def _update_theme_assets(self, theme_name: str = None, **kwargs):
+        """Обновление цветовых акцентов и иконок при смене темы оформления."""
+        accent = ThemeManager.get_current_accent_color()
+        curr_theme = theme_name or ThemeManager.get_current_theme_name()
+        is_light = curr_theme in ("Pearl Light", "Как дома")
+        
+        if hasattr(self, 'glass_dash_icon'):
+            self.glass_dash_icon.set_color(accent)
+
+        if hasattr(self, 'btn_arcus_mode'):
+            self.btn_arcus_mode.blockSignals(True)
+            self.btn_arcus_mode.setChecked(curr_theme == "Как дома")
+            self.btn_arcus_mode.blockSignals(False)
+
+        self._update_kpi_metrics()
+        if hasattr(self, '_update_smart_navigation_ui'):
+            self._update_smart_navigation_ui()
+
+    def _on_house_combo_changed(self, idx: int):
+        if idx < 0:
+            return
+        selected_path = self.combo_houses.itemData(idx)
+        tpl_path = getattr(self.drop_tpl, 'file_path', '')
+        if selected_path and os.path.exists(selected_path):
+            if not tpl_path or os.path.normpath(selected_path) != os.path.normpath(tpl_path):
+                self.drop_tpl.set_file_path(selected_path, notify=False)
+                self._on_template_selected(selected_path)
+
+    def _on_auto_arcus_clicked(self):
+        found_arc = self.folder_ctx.get("found_arcus_path")
+        if found_arc and os.path.exists(found_arc):
+            self.drop_arc.set_file_path(found_arc, notify=False)
+            self._on_arcus_selected(found_arc)
+            self.btn_auto_arcus.setVisible(False)
+            parent_win = self.window()
+            if parent_win:
+                ToastNotification.show_toast(parent_win, f"Файл Аркус подключен: {os.path.basename(found_arc)}", "SUCCESS")
+                if hasattr(parent_win, 'companion_manager') and parent_win.companion_manager:
+                    win_files = getattr(parent_win.companion_manager, 'win_files', None)
+                    if win_files:
+                        win_files.set_arcus_path(found_arc)
+
+    @Slot(str)
+    def _on_arcus_selected(self, arc_path: str):
+        # Проверка соответствия папки месяца Аркуса
+        tpl_path = getattr(self.drop_tpl, 'file_path', '')
+        if tpl_path and arc_path:
+            month_val = FolderNavigationService.validate_arcus_month_folder(tpl_path, arc_path)
+            if not month_val["is_valid"]:
+                parent_win = self.window()
+                confirmed = FileGuardDialog.show_month_mismatch_dialog(
+                    parent_win,
+                    tpl_house=os.path.basename(tpl_path),
+                    target_month_str=month_val["target_month_name"],
+                    arc_month_str=month_val["arcus_month_name"] or "Неизвестно",
+                    arc_path=arc_path
+                )
+                if not confirmed:
+                    self.drop_arc.clear_file()
+                    return
+
+        out_dir = os.path.dirname(os.path.abspath(arc_path)) if os.path.isfile(arc_path) else os.path.abspath(arc_path)
         self.last_arcus_dir = out_dir
         settings = QSettings("WaterMetrics", "Directories")
         settings.setValue("LastArcusDir", out_dir)
 
+        # Синхронизация с режимом набивки без рекурсии
+        parent_win = self.window()
+        if parent_win and hasattr(parent_win, 'companion_manager') and parent_win.companion_manager:
+            win_files = getattr(parent_win.companion_manager, 'win_files', None)
+            if win_files:
+                win_files.set_arcus_path(arc_path)
+
         self._update_file_linking_status()
+        if hasattr(self, '_update_smart_navigation_ui'):
+            self._update_smart_navigation_ui()
 
     def _update_file_linking_status(self):
         tpl_path = getattr(self.drop_tpl, 'file_path', '')
@@ -1057,8 +1426,11 @@ class MainDashboardPage(QWidget):
             arc_name = os.path.basename(arc_path)
             if tpl_path:
                 tpl_name = os.path.basename(tpl_path)
-                accent = ThemeManager.get_current_accent_color()
-                self.drop_arc.set_highlight_state("linked", f"[ВЫБРАН] Аркус: <b>{arc_name}</b><br/><span style='color:{accent};'>Связано с шаблоном: <b>{tpl_name}</b></span>")
+                month_val = FolderNavigationService.validate_arcus_month_folder(tpl_path, arc_path)
+                if not month_val["is_valid"]:
+                    self.drop_arc.set_highlight_state("warning", f"⚠️ Папка: {month_val['arcus_month_name']} (нужен {month_val['target_month_name']})")
+                else:
+                    self.drop_arc.set_highlight_state("linked", f"[ВЫБРАН] Аркус: <b>{arc_name}</b>")
             else:
                 self.drop_arc.set_highlight_state("warning", f"[ВЫБРАН] Аркус: <b>{arc_name}</b><br/><span style='color:#F87171;'>Шаблон не выбран!</span>")
         else:
@@ -1093,6 +1465,66 @@ class MainDashboardPage(QWidget):
     def _open_replacement_master(self):
         if self.main_win and hasattr(self.main_win, 'open_replacement_dialog'):
             self.main_win.open_replacement_dialog()
+
+    def _open_import_dialog(self):
+        """Открыть диалог импорта показаний из внешней набивочной таблицы Excel."""
+        from ui.dialogs.excel_import_dialog import ExcelImportDialog
+        house_name = self.folder_ctx.get("house_name", "") if self.folder_ctx else ""
+        if not house_name:
+            tpl_path = getattr(self.drop_tpl, 'file_path', '')
+            if tpl_path:
+                house_name = self.excel_manager.extract_house_name(tpl_path)
+
+        dlg = ExcelImportDialog(self, house_name=house_name)
+        dlg.values_accepted.connect(self._apply_imported_values)
+        dlg.exec()
+
+    def _check_and_apply_session_import_suggestions(self, house_name: str):
+        """Проверяет кэш сессии импорта и выставляет серые подсказки для дома."""
+        if not house_name:
+            return
+        from services.import_session_service import ImportSessionService
+        vals = ImportSessionService.get_values_for_house(house_name)
+        if vals:
+            c = str(vals.get('хвс', 0.0))
+            h = str(vals.get('гвс', 0.0))
+            d = str(vals.get('доб', 0.0))
+            self.txt_cold.set_suggested_value(c)
+            self.txt_hot.set_suggested_value(h)
+            self.txt_corr.set_suggested_value(d)
+
+            # Синхронизация с companion dock
+            parent_win = self.window()
+            if parent_win and hasattr(parent_win, 'companion_manager') and parent_win.companion_manager:
+                win_vals = getattr(parent_win.companion_manager, 'win_values', None)
+                if win_vals:
+                    win_vals.set_suggested_values(c, h, d)
+
+            self._update_kpi_metrics()
+            ToastNotification.show_toast(
+                self.window(),
+                f"💡 Подставлены показания для «{house_name}» (Enter для подтверждения)",
+                "INFO"
+            )
+
+    def _apply_imported_values(self, hvs: float, gvs: float, dob: float):
+        """Применить импортированные значения ХВС/ГВС/ДОБ из внешней таблицы."""
+        self.txt_cold.setText(str(hvs))
+        self.txt_hot.setText(str(gvs))
+        self.txt_corr.setText(str(dob))
+        self.txt_cold.commit_suggestion()
+        self.txt_hot.commit_suggestion()
+        self.txt_corr.commit_suggestion()
+
+        # Синхронизация с companion dock
+        parent_win = self.window()
+        if parent_win and hasattr(parent_win, 'companion_manager') and parent_win.companion_manager:
+            win_vals = getattr(parent_win.companion_manager, 'win_values', None)
+            if win_vals:
+                win_vals.set_values(str(hvs), str(gvs), str(dob))
+
+        self._update_kpi_metrics()
+        ToastNotification.show_toast(self, f"✅ Импортировано: ХВС={hvs}, ГВС={gvs}, ДОБ={dob}", "SUCCESS")
 
     def _open_selected_history_file(self):
         selected_rows = sorted(list(set(index.row() for index in self.table_hist.selectedIndexes())))
