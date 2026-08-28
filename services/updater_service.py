@@ -26,7 +26,8 @@ import socket
 from typing import Optional, Tuple, List
 from dataclasses import dataclass
 
-from PySide6.QtCore import QThread, Signal, QObject, QSettings
+from PySide6.QtCore import QThread, Signal, QObject, QSettings, QEventLoop, QTimer, QUrl, QByteArray
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from config import (
     APP_VERSION, DEFAULT_GITHUB_REPO, GITHUB_API_BASE,
     UPDATE_MANIFEST_URL, LICENSE_API_URL, DATA_DIR
@@ -36,7 +37,118 @@ from config import (
 if not getattr(sys, 'frozen', False):
     os.environ.pop('_MEIPASS2', None)
     os.environ.pop('_MEIPASS', None)
-sys.path = [p for p in sys.path if not ('_MEI' in p and not os.path.exists(p))]
+sys.path = [p for p in sys.path if p and os.path.exists(p)]
+
+
+def fetch_json_via_qt(url: str, custom_headers: Optional[dict] = None, timeout_ms: int = 7000) -> Tuple[Optional[dict], Optional[str]]:
+    """
+    Выполняет HTTP GET запрос через нативный C++ стек Qt (QNetworkAccessManager).
+    Полностью изолирован от Python ssl / base_library.zip, поддерживает системные прокси Windows.
+    """
+    try:
+        mgr = QNetworkAccessManager()
+        req = QNetworkRequest(QUrl(url))
+        req.setRawHeader(b"User-Agent", f"WaterMetrics-App/{APP_VERSION}".encode("utf-8"))
+        req.setRawHeader(b"Accept", b"application/json")
+        req.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute, QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
+
+        if custom_headers:
+            for k, v in custom_headers.items():
+                req.setRawHeader(k.encode("utf-8"), str(v).encode("utf-8"))
+
+        loop = QEventLoop()
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(loop.quit)
+
+        reply = mgr.get(req)
+        reply.finished.connect(loop.quit)
+        timer.start(timeout_ms)
+        loop.exec()
+
+        if timer.isActive():
+            timer.stop()
+        else:
+            reply.abort()
+            reply.deleteLater()
+            return None, "Превышено время ожидания ответа сервера (Timeout)"
+
+        if reply.error() != QNetworkReply.NetworkError.NoError:
+            err_str = reply.errorString()
+            reply.deleteLater()
+            return None, err_str
+
+        data_bytes = reply.readAll().data()
+        reply.deleteLater()
+        json_data = json.loads(data_bytes.decode("utf-8"))
+        return json_data, None
+    except Exception as e:
+        return None, str(e)
+
+
+def download_file_via_qt(url: str, dest_path: str, progress_callback=None, cancel_checker=None, timeout_ms: int = 60000) -> Tuple[bool, Optional[str]]:
+    """
+    Скачивает файл через нативный C++ стек Qt с поддержкой индикации прогресса.
+    """
+    try:
+        mgr = QNetworkAccessManager()
+        req = QNetworkRequest(QUrl(url))
+        req.setRawHeader(b"User-Agent", f"WaterMetrics-App/{APP_VERSION}".encode("utf-8"))
+        req.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute, QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
+
+        loop = QEventLoop()
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(loop.quit)
+
+        reply = mgr.get(req)
+
+        with open(dest_path, "wb") as f:
+            def on_ready_read():
+                if cancel_checker and cancel_checker():
+                    reply.abort()
+                    return
+                f.write(reply.readAll().data())
+
+            def on_progress(recv, total):
+                if cancel_checker and cancel_checker():
+                    reply.abort()
+                    return
+                if progress_callback:
+                    progress_callback(recv, total)
+
+            reply.readyRead.connect(on_ready_read)
+            reply.downloadProgress.connect(on_progress)
+            reply.finished.connect(loop.quit)
+
+            timer.start(timeout_ms)
+            loop.exec()
+
+        if timer.isActive():
+            timer.stop()
+        else:
+            reply.abort()
+            reply.deleteLater()
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
+            return False, "Превышено время ожидания загрузки (Timeout)"
+
+        if reply.error() != QNetworkReply.NetworkError.NoError:
+            err_str = reply.errorString()
+            reply.deleteLater()
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
+            return False, err_str
+
+        reply.deleteLater()
+        return True, None
+    except Exception as e:
+        if os.path.exists(dest_path):
+            try:
+                os.remove(dest_path)
+            except Exception:
+                pass
+        return False, str(e)
 
 
 def get_ssl_context() -> Optional[ssl.SSLContext]:
@@ -395,7 +507,6 @@ class RemoteUpdateChecker(QThread):
 
     def _check_yandex_manifest(self) -> Optional[ReleaseInfo]:
         """Парсит легковесный JSON-манифест из Яндекс Облака."""
-        ctx = get_ssl_context()
         headers = {
             "User-Agent": f"WaterMetrics-App/{self.current_ver}",
             "Accept": "application/json"
@@ -404,9 +515,17 @@ class RemoteUpdateChecker(QThread):
             headers["X-License-Key"] = self.license_key
             headers["X-HWID"] = get_system_hwid()
 
-        req = urllib.request.Request(self.manifest_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=5.0, context=ctx) as response:
-            data = json.loads(response.read().decode('utf-8'))
+        # 1. Пробуем через нативный C++ стек Qt (QNetworkAccessManager)
+        data, err = fetch_json_via_qt(self.manifest_url, headers)
+        if not data:
+            # 2. Fallback на urllib
+            ctx = get_ssl_context()
+            req = urllib.request.Request(self.manifest_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=5.0, context=ctx) as response:
+                data = json.loads(response.read().decode('utf-8'))
+
+        if not data:
+            return None
 
         remote_ver = str(data.get("version", "")).lstrip("vV")
         if not remote_ver:
@@ -435,16 +554,19 @@ class RemoteUpdateChecker(QThread):
     def _check_github_releases(self) -> Optional[ReleaseInfo]:
         """Fallback: чтение релизов через GitHub API."""
         api_url = f"{GITHUB_API_BASE}/{self.repo}/releases/latest"
-        req = urllib.request.Request(
-            api_url,
-            headers={
-                "User-Agent": f"WaterMetrics-App/{self.current_ver}",
-                "Accept": "application/vnd.github.v3+json"
-            }
-        )
-        ctx = get_ssl_context()
-        with urllib.request.urlopen(req, timeout=7.0, context=ctx) as response:
-            data = json.loads(response.read().decode('utf-8'))
+        headers = {
+            "User-Agent": f"WaterMetrics-App/{self.current_ver}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        data, err = fetch_json_via_qt(api_url, headers)
+        if not data:
+            ctx = get_ssl_context()
+            req = urllib.request.Request(api_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=7.0, context=ctx) as response:
+                data = json.loads(response.read().decode('utf-8'))
+
+        if not data:
+            return None
 
         tag_name = data.get("tag_name", "")
         release_name = data.get("name", tag_name)
@@ -459,42 +581,38 @@ class RemoteUpdateChecker(QThread):
         is_patch = False
         is_frozen = getattr(sys, 'frozen', False)
 
-        if is_frozen:
-            for asset in assets:
-                name = asset.get("name", "")
-                if name.lower().endswith(".exe"):
-                    chosen_asset_name = name
-                    chosen_download_url = asset.get("browser_download_url")
-                    chosen_size = asset.get("size", 0)
-                    break
-        else:
-            for asset in assets:
-                name = asset.get("name", "")
-                if "patch" in name.lower() and name.lower().endswith(".zip"):
-                    chosen_asset_name = name
-                    chosen_download_url = asset.get("browser_download_url")
-                    chosen_size = asset.get("size", 0)
-                    is_patch = True
-                    break
+        for asset in assets:
+            name = asset.get("name", "")
+            lower_name = name.lower()
+            if not is_frozen and lower_name.endswith(".zip") and ("patch" in lower_name or "update" in lower_name):
+                chosen_asset_name = name
+                chosen_download_url = asset.get("browser_download_url")
+                chosen_size = asset.get("size", 0)
+                is_patch = True
+                break
+            elif is_frozen and lower_name.endswith(".exe") and ("setup" in lower_name or "installer" in lower_name or "watermetrics" in lower_name):
+                chosen_asset_name = name
+                chosen_download_url = asset.get("browser_download_url")
+                chosen_size = asset.get("size", 0)
+                is_patch = False
+                break
+
+        if not chosen_download_url and assets:
+            chosen_asset_name = assets[0].get("name")
+            chosen_download_url = assets[0].get("browser_download_url")
+            chosen_size = assets[0].get("size", 0)
+            is_patch = str(chosen_asset_name).lower().endswith(".zip")
 
         if not chosen_download_url:
-            for asset in assets:
-                name = asset.get("name", "")
-                if name.lower().endswith(".zip"):
-                    chosen_asset_name = name
-                    chosen_download_url = asset.get("browser_download_url")
-                    chosen_size = asset.get("size", 0)
-                    is_patch = True
-                    break
-
-        if not chosen_download_url:
-            chosen_download_url = data.get("zipball_url") or f"https://github.com/{self.repo}/archive/refs/tags/{tag_name}.zip"
-            chosen_asset_name = f"WaterMetrics_{tag_name}.zip"
+            chosen_download_url = data.get("zipball_url", "")
+            chosen_asset_name = f"WaterMetrics-{tag_name}.zip"
             is_patch = True
+
+        version_str = tag_name.lstrip("vV")
 
         return ReleaseInfo(
             tag_name=tag_name,
-            version=tag_name.lstrip('vV'),
+            version=version_str,
             name=release_name,
             body=body,
             published_at=published_at,
@@ -542,35 +660,47 @@ class RemoteAssetDownloader(QThread):
             os.makedirs(temp_dir, exist_ok=True)
             temp_file_path = os.path.join(temp_dir, self.filename)
 
-            req = urllib.request.Request(
-                self.download_url,
-                headers={"User-Agent": f"WaterMetrics-App/{APP_VERSION}"}
-            )
+            def progress_cb(recv, total):
+                pct = int((recv / total) * 100) if total > 0 else 0
+                self.progress.emit(pct, recv, total)
 
-            ctx = get_ssl_context()
+            def cancel_chk():
+                return self._is_cancelled
 
-            with urllib.request.urlopen(req, timeout=30.0, context=ctx) as response:
-                total_size = int(response.headers.get("content-length", 0))
-                downloaded = 0
-                chunk_size = 64 * 1024  # 64 KB chunks
+            # 1. Пробуем скачать через нативный стек Qt C++ (быстро и без блокировок)
+            ok, err = download_file_via_qt(self.download_url, temp_file_path, progress_callback=progress_cb, cancel_checker=cancel_chk)
 
-                with open(temp_file_path, "wb") as f:
-                    while True:
-                        if self._is_cancelled:
-                            f.close()
-                            if os.path.exists(temp_file_path):
-                                os.remove(temp_file_path)
-                            return
+            if not ok or not os.path.exists(temp_file_path):
+                if self._is_cancelled:
+                    return
+                # 2. Fallback на urllib
+                req = urllib.request.Request(
+                    self.download_url,
+                    headers={"User-Agent": f"WaterMetrics-App/{APP_VERSION}"}
+                )
+                ctx = get_ssl_context()
+                with urllib.request.urlopen(req, timeout=30.0, context=ctx) as response:
+                    total_size = int(response.headers.get("content-length", 0))
+                    downloaded = 0
+                    chunk_size = 64 * 1024  # 64 KB chunks
 
-                        chunk = response.read(chunk_size)
-                        if not chunk:
-                            break
+                    with open(temp_file_path, "wb") as f:
+                        while True:
+                            if self._is_cancelled:
+                                f.close()
+                                if os.path.exists(temp_file_path):
+                                    os.remove(temp_file_path)
+                                return
 
-                        f.write(chunk)
-                        downloaded += len(chunk)
+                            chunk = response.read(chunk_size)
+                            if not chunk:
+                                break
 
-                        pct = int((downloaded / total_size) * 100) if total_size > 0 else 0
-                        self.progress.emit(pct, downloaded, total_size)
+                            f.write(chunk)
+                            downloaded += len(chunk)
+
+                            pct = int((downloaded / total_size) * 100) if total_size > 0 else 0
+                            self.progress.emit(pct, downloaded, total_size)
 
             if self._is_cancelled:
                 return
