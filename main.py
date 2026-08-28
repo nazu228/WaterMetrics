@@ -1,6 +1,13 @@
 # main.py
 import sys
 import os
+
+# Очистка устаревших путей PyInstaller _MEIPASS из sys.path и окружения
+if not getattr(sys, 'frozen', False):
+    os.environ.pop('_MEIPASS2', None)
+    os.environ.pop('_MEIPASS', None)
+sys.path = [p for p in sys.path if not ('_MEI' in p and not os.path.exists(p))]
+
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtGui import QSurfaceFormat, QIcon
 from config import APP_VERSION

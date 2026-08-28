@@ -19,7 +19,10 @@ import tempfile
 import subprocess
 import urllib.request
 import urllib.error
+import urllib.parse
+import http.client
 import ssl
+import socket
 from typing import Optional, Tuple, List
 from dataclasses import dataclass
 
@@ -28,6 +31,24 @@ from config import (
     APP_VERSION, DEFAULT_GITHUB_REPO, GITHUB_API_BASE,
     UPDATE_MANIFEST_URL, LICENSE_API_URL, DATA_DIR
 )
+
+# Очистка устаревших путей PyInstaller _MEIPASS из sys.path и окружения
+if not getattr(sys, 'frozen', False):
+    os.environ.pop('_MEIPASS2', None)
+    os.environ.pop('_MEIPASS', None)
+sys.path = [p for p in sys.path if not ('_MEI' in p and not os.path.exists(p))]
+
+
+def get_ssl_context() -> Optional[ssl.SSLContext]:
+    """Создает надежный SSL-контекст с защитой от сбоев base_library.zip в PyInstaller."""
+    try:
+        return ssl.create_default_context()
+    except Exception:
+        pass
+    try:
+        return ssl._create_unverified_context()
+    except Exception:
+        return None
 
 
 def calculate_file_sha256(file_path: str) -> str:
@@ -354,7 +375,7 @@ class RemoteUpdateChecker(QThread):
 
     def _check_yandex_manifest(self) -> Optional[ReleaseInfo]:
         """Парсит легковесный JSON-манифест из Яндекс Облака."""
-        ctx = ssl.create_default_context()
+        ctx = get_ssl_context()
         headers = {
             "User-Agent": f"WaterMetrics-App/{self.current_ver}",
             "Accept": "application/json"
@@ -401,7 +422,7 @@ class RemoteUpdateChecker(QThread):
                 "Accept": "application/vnd.github.v3+json"
             }
         )
-        ctx = ssl.create_default_context()
+        ctx = get_ssl_context()
         with urllib.request.urlopen(req, timeout=7.0, context=ctx) as response:
             data = json.loads(response.read().decode('utf-8'))
 
@@ -506,7 +527,7 @@ class RemoteAssetDownloader(QThread):
                 headers={"User-Agent": f"WaterMetrics-App/{APP_VERSION}"}
             )
 
-            ctx = ssl.create_default_context()
+            ctx = get_ssl_context()
 
             with urllib.request.urlopen(req, timeout=30.0, context=ctx) as response:
                 total_size = int(response.headers.get("content-length", 0))
@@ -593,11 +614,14 @@ class WindowsUpdateDeployer:
                             elif os.path.isfile(src_item):
                                 shutil.copy2(src_item, dst_item)
 
-                # Перезапуск программы с новой версией
+                # Перезапуск программы с новой версией и чистым окружением (без _MEIPASS)
+                clean_env = dict(os.environ)
+                clean_env.pop('_MEIPASS', None)
+                clean_env.pop('_MEIPASS2', None)
                 if is_frozen:
-                    subprocess.Popen([current_exe], close_fds=True)
+                    subprocess.Popen([current_exe], env=clean_env, close_fds=True)
                 else:
-                    subprocess.Popen([sys.executable, current_exe], close_fds=True)
+                    subprocess.Popen([sys.executable, current_exe], env=clean_env, close_fds=True)
                 return True
 
             # 2. Если скачан установочный exe (installer), запускаем его через ShellExecute (explorer.exe)
